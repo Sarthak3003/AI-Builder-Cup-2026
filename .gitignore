@@ -19,3 +19,4 @@ playwright-report/
 service-account*.json
 *-credentials.json
 .npm-cache/
+.tools/

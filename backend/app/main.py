@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from pydantic import BaseModel
 
 from app.config import Settings
+from app.database import FirestoreConnection
 
 
 class HealthResponse(BaseModel):
@@ -28,6 +29,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/version", response_model=VersionResponse, include_in_schema=False)
     def version() -> VersionResponse:
         return VersionResponse(version=config.version, environment=config.environment)
+
+    @application.get("/ready")
+    @application.get("/api/ready", include_in_schema=False)
+    def readiness(response: Response) -> dict[str, str]:
+        status = FirestoreConnection(config).probe()
+        response.status_code = 200 if status == "ready" else 503
+        return {"status": "ready" if status == "ready" else "not_ready", "firestore": status}
 
     return application
 

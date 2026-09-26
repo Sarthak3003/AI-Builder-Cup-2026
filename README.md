@@ -78,3 +78,7 @@ Do not commit credentials or service-account keys. No credentials are required f
 ## Budget and approvals
 
 Target: zero out-of-pocket prototype development. Cloud deployment requires checking account eligibility and billing first; no free-forever guarantee. Each new task requires the owner's approval. No cloud resources, paid services, GitLab project, or remote changes have been created by this local setup.
+
+## Firestore readiness
+
+See `docs/firestore.md` for the local emulator setup and explicit cloud opt-in. Database mode defaults to disabled; `/ready` returns 503 until a real Firestore probe succeeds. `/health` remains API liveness-only. Cloud Firestore has not been connected or deployed.
