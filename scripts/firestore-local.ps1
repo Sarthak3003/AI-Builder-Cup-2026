@@ -1,4 +1,4 @@
-param([switch]$Test)
+param([switch]$Test, [switch]$HubOnly)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $javaDirectories = @(Get-ChildItem -LiteralPath "$projectRoot/.tools/java21" -Directory)
@@ -20,7 +20,9 @@ try {
     if ($Test) {
         $env:SAATHI_RUN_EMULATOR_TESTS = '1'
         $env:FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085'
-        & node $firebaseEntry emulators:exec --only firestore --project demo-saathi --non-interactive '.venv\Scripts\python.exe -m pytest backend/tests/test_firestore_emulator.py -q -p no:cacheprovider'
+        $testCommand = '.venv\Scripts\python.exe -m pytest backend/tests/test_firestore_emulator.py -q -p no:cacheprovider'
+        if ($HubOnly) { $testCommand += ' -k hub' }
+        & node $firebaseEntry emulators:exec --only firestore --project demo-saathi --non-interactive $testCommand
     } else {
         & node $firebaseEntry emulators:start --only firestore --project demo-saathi --non-interactive
     }
@@ -31,3 +33,4 @@ try {
         [Environment]::SetEnvironmentVariable($variableName, $priorValues[$variableName], 'Process')
     }
 }
+

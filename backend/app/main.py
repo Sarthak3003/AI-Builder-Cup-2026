@@ -3,6 +3,8 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.database import FirestoreConnection
+from app.demo import demo_router
+from app.hub import hub_router
 
 
 class HealthResponse(BaseModel):
@@ -36,6 +38,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         status = FirestoreConnection(config).probe()
         response.status_code = 200 if status == "ready" else 503
         return {"status": "ready" if status == "ready" else "not_ready", "firestore": status}
+
+    # Local-only until public access controls and cloud storage are configured.
+    if config.environment in {"local", "test"}:
+        application.include_router(demo_router(config))
+    if config.environment in {"local", "test"} or config.firestore_mode == "cloud":
+        application.include_router(hub_router(config))
 
     return application
 

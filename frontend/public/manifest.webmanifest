@@ -1,0 +1,10 @@
+{
+  "name": "Saathi — Your everyday companion",
+  "short_name": "Saathi",
+  "description": "One accessible companion for meals, rides and essentials.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f9f5",
+  "theme_color": "#244f3e",
+  "icons": [{"src": "/saathi.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]
+}

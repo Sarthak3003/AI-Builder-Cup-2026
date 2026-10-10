@@ -1,0 +1,41 @@
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const {chromium} = require(require.resolve('playwright', {paths:[path.resolve(__dirname, '../frontend')]}));
+(async()=>{
+ const browser=await chromium.launch({headless:true,channel:process.env.SAATHI_BROWSER_CHANNEL || 'msedge'});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ const page=await context.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5173'); await page.getByText('Hello, Friend.').waitFor();
+ await page.getByRole('button',{name:'My profile',exact:true}).click();
+ await page.getByLabel('Your name',{exact:true}).fill('Demo Friend');
+ await page.getByLabel('Larger text',{exact:true}).check();
+ await page.getByLabel('Require caregiver approval',{exact:false}).check();
+ await page.getByLabel('Approval limit (₹)',{exact:true}).fill('100');
+ await page.getByRole('button',{name:'Save preferences'}).click();
+ await page.getByText('Preferences saved for every service.').waitFor();
+ await page.getByRole('button',{name:'Care circle',exact:true}).click();
+ await page.getByRole('button',{name:'Create invitation'}).click();
+ const invitation=await page.getByLabel('Private invitation code').inputValue();
+ const careContext=await browser.newContext({viewport:{width:1440,height:1000}});
+ const care=await careContext.newPage();await care.goto('http://127.0.0.1:5173');await care.getByText('Hello, Friend.').waitFor();
+ await care.getByRole('button',{name:'Care circle',exact:true}).click();await care.getByLabel('Invitation code',{exact:true}).fill(invitation);await care.getByRole('button',{name:'Join as caregiver'}).click();await care.getByRole('heading',{name:'Caregiver approvals'}).waitFor();
+ await page.getByRole('button',{name:'My Saathi',exact:true}).click();
+ await page.getByRole('button',{name:'Show options'}).click();
+ await page.getByRole('button',{name:'Choose Dal and rice'}).click();
+ await page.getByRole('button',{name:'Confirm demo request'}).click();
+ await page.getByText('Waiting for caregiver',{exact:true}).waitFor();
+ await care.getByRole('button',{name:'Refresh activity'}).click();await care.getByRole('button',{name:'Approve',exact:true}).click();
+ await page.getByRole('button',{name:'Refresh activity'}).click();await page.getByText('Confirmed · demo only',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'My Saathi',exact:true}).click();await page.getByRole('button',{name:/Go somewhere/}).click();await page.getByLabel('Destination',{exact:true}).fill('Community centre');await page.getByLabel('Interaction mode').selectOption('message');await page.getByRole('button',{name:'Show options'}).click();await page.getByRole('button',{name:'Choose Demo auto'}).click();await page.getByRole('button',{name:'Confirm demo request'}).click();await page.getByRole('heading',{name:'Your activity'}).waitFor();await page.getByRole('heading',{name:'Demo auto'}).waitFor();
+ await page.getByRole('button',{name:'My Saathi',exact:true}).click();await page.getByRole('button',{name:/Medicine request/}).click();await page.getByRole('button',{name:'Show options'}).click();await page.getByRole('button',{name:'Choose Saved medicine A'}).click();await page.getByRole('button',{name:'Confirm demo request'}).click();await page.getByText('Waiting for caregiver',{exact:true}).waitFor();
+ await care.getByRole('button',{name:'Refresh activity'}).click();await care.getByRole('button',{name:'Decline',exact:true}).click();await page.getByRole('button',{name:'Refresh activity'}).click();await page.getByText('Declined by caregiver',{exact:true}).waitFor();
+ await page.reload();await page.getByText('Hello, Demo Friend.').waitFor();await page.getByRole('button',{name:'Activity',exact:true}).click();assert.equal(await page.locator('.activity-list article').count(),3);
+ await page.locator('.activity-list').screenshot({path:'submission/saathi-activity.png'});
+ await page.getByRole('button',{name:'My Saathi',exact:true}).click();await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:'submission/saathi-home.png',fullPage:false});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:'submission/saathi-mobile.png',fullPage:false});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+ await page.getByRole('button',{name:/Care circle/}).click();await page.getByRole('button',{name:'Revoke caregiver access'}).click();await page.getByText('Previous caregiver access and invitations are revoked.').waitFor();await care.getByRole('button',{name:'Refresh activity'}).click();await care.getByText('Caregiver access was revoked.',{exact:false}).waitFor();
+ assert.deepEqual(errors,[]);console.log('PASS: profile, large text, food approval, ride, medicine rejection, reload persistence, caregiver revocation, mobile overflow, no page errors');
+ await browser.close();
+})().catch(e=>{console.error(e.stack);process.exit(1)});
+
+

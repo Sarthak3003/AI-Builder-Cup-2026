@@ -20,3 +20,5 @@ service-account*.json
 *-credentials.json
 .npm-cache/
 .tools/
+
+.local/
