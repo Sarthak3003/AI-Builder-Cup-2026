@@ -46,3 +46,16 @@ test('connection failures remain visible and can retry', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(await screen.findByText('Hello, Friend.')).toBeInTheDocument()
 })
+
+test('footer shows the live backend status on every page', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => ({
+    ok: true,
+    json: async () => path === '/api/health' ? { status: 'ok', service: 'saathi-api' }
+      : path === '/api/version' ? { version: '0.1.0', environment: 'test' } : initial,
+  })))
+  render(<App />)
+  await screen.findByText('Hello, Friend.')
+  expect(await screen.findByText('Backend connected · v0.1.0')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Activity' }))
+  expect(screen.getByText('Backend connected · v0.1.0')).toBeInTheDocument()
+})
