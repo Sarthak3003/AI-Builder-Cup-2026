@@ -43,6 +43,97 @@ test('apps the user turned off disappear from the home cards', async () => {
   expect(await screen.findByRole('link', { name: /Book a ride\s*Ola · Rapido \(demo\)/ })).toBeInTheDocument()
 })
 
+type Heard = { results: ArrayLike<{ isFinal?: boolean; 0: { transcript: string } }> }
+class FakeRecognition {
+  static last: FakeRecognition | null = null
+  lang = ''
+  continuous = true
+  interimResults = false
+  onresult: ((event: Heard) => void) | null = null
+  onerror: ((event: { error?: string }) => void) | null = null
+  onend: (() => void) | null = null
+  start = vi.fn()
+  stop = vi.fn(() => this.onend?.())
+  constructor() { FakeRecognition.last = this }
+}
+const spoken = "Take me to Dr Mehta's clinic"
+const routedRide: Proposal = {
+  id: '22222222-2222-4222-8222-222222222222', service: 'ride', channel: 'voice', options: [rapidoRide, olaRide, uberRide],
+  clarification: '', summary: 'Ride options within ₹200', status: 'proposed', expires_at: Date.now() / 1000 + 900,
+  input: { message: spoken, destination: "Dr Mehta's clinic" },
+}
+const askedBack = (service: Service | null, clarification: string) => ({
+  id: '33333333-3333-4333-8333-333333333333', service, channel: 'app', options: [], clarification,
+  summary: 'More details needed', status: 'needs_details', expires_at: 0, understood_by: 'keywords',
+})
+
+test('one tap on the big microphone: Saathi hears the request, works out the service and opens the options', async () => {
+  vi.stubGlobal('SpeechRecognition', FakeRecognition)
+  const calls = stubApi({
+    'POST /ask': () => ({ ...routedRide, understood_by: 'keywords' }),
+    'GET /state': () => makeState({ requests: [routedRide] }),
+  })
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Just tell Saathi what you need' })).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Tap and speak' }))
+  act(() => FakeRecognition.last?.onend?.())
+  expect(screen.getByText('I did not hear anything. Tap the microphone and try again.')).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Tap and speak' }))
+  const engine = FakeRecognition.last
+  expect(engine?.lang).toBe('en-IN')
+  expect(engine?.start).toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Listening… tap to stop' })).toBeInTheDocument()
+  act(() => engine?.onresult?.({ results: [{ isFinal: false, 0: { transcript: 'Take me to' } }] }))
+  expect(screen.getByText('“Take me to”')).toBeInTheDocument()
+  expect(calls.some((call) => call.url.endsWith('/ask'))).toBe(false)
+  act(() => engine?.onresult?.({ results: [{ isFinal: true, 0: { transcript: spoken } }] }))
+
+  expect(await screen.findByRole('heading', { name: 'Ride options within ₹200' })).toBeInTheDocument()
+  expect(window.location.hash).toBe(`#/request/ride/${routedRide.id}`)
+  expect(screen.getByText(`You asked: “${spoken}”`)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Choose Uber Go from Uber' })).toBeInTheDocument()
+  expect(calls.filter((call) => call.url.endsWith('/ask')).map((call) => call.body)).toEqual([expect.objectContaining({ message: spoken, channel: 'voice' })])
+  expect(confirmCalls(calls)).toHaveLength(0)
+})
+
+test('typing works too, and an unclear request is asked back instead of guessed', async () => {
+  const replies = [askedBack(null, 'Do you need a ride, food or medicine?'), askedBack('ride', 'Where would you like to go?')]
+  const calls = stubApi({ 'POST /ask': () => replies.shift() })
+  render(<App />)
+  const box = await screen.findByRole('textbox', { name: 'Or type it here' })
+  await userEvent.type(box, 'hello there{Enter}')
+  expect(await screen.findByText(/Do you need a ride, food or medicine\?/)).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /^Open (Book|Order|Medicine)/ })).not.toBeInTheDocument()
+
+  await userEvent.clear(box)
+  await userEvent.type(box, 'book a taxi')
+  await userEvent.click(screen.getByRole('button', { name: 'Ask Saathi' }))
+  expect(await screen.findByText(/Where would you like to go\?/)).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Open Book a ride' })).toHaveAttribute('href', '#/request/ride')
+  expect(window.location.hash).toBe('')
+  expect(calls.filter((call) => call.url.endsWith('/ask')).map((call) => (call.body as { channel: string }).channel)).toEqual(['app', 'app'])
+})
+
+test('without voice in the browser, the microphone points to typing instead of failing silently', async () => {
+  stubApi()
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Tap and speak' }))
+  expect(screen.getByText(/Voice is not available in this browser/)).toBeInTheDocument()
+  expect(screen.getByRole('textbox', { name: 'Or type it here' })).toHaveFocus()
+})
+
+test('the microphone speaks Hindi when the profile does', async () => {
+  vi.stubGlobal('SpeechRecognition', FakeRecognition)
+  const state = makeState()
+  state.profile.language = 'hi-IN'
+  stubApi({}, state)
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'दबाएँ और बोलें' }))
+  expect(FakeRecognition.last?.lang).toBe('hi-IN')
+})
+
 test('bottom navigation has five tabs and marks the current page', async () => {
   stubApi()
   render(<App />)

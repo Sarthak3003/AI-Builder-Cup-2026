@@ -141,6 +141,65 @@ def test_clarifications_and_budget(client):
     assert propose(client, message="peanut allergy")["options"] == []
 
 
+def ask(client, message, channel="voice"):
+    result = client.post(
+        "/api/hub/ask", json={"id": str(uuid4()), "message": message, "channel": channel}
+    )
+    assert result.status_code == 200, result.text
+    return result.json()
+
+
+def test_ask_routes_one_sentence_to_options_without_booking(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    ride = ask(client, "Take me to Dr Mehta's clinic please")
+    assert (ride["service"], ride["status"], ride["understood_by"]) == (
+        "ride",
+        "proposed",
+        "keywords",
+    )
+    assert ride["input"]["destination"] == "Dr Mehta's clinic"
+    assert {option["provider"] for option in ride["options"]} == {"uber", "ola", "rapido"}
+    food = ask(client, "something light to eat under 120", channel="app")
+    assert [option["id"] for option in food["options"]] == ["swiggy-khichdi"]
+    state = client.get("/api/hub/state").json()
+    assert state["activity"] == []
+    assert {item["id"] for item in state["requests"]} == {ride["id"], food["id"]}
+    assert confirm(client, ride, "uber-go").json()["reference"].startswith("SIM-")
+
+
+def test_ask_asks_back_instead_of_guessing(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    unclear = ask(client, "what is the weather")
+    assert (unclear["service"], unclear["options"]) == (None, [])
+    assert "ride, food or medicine" in unclear["clarification"]
+    where = ask(client, "book me a taxi")
+    assert (where["service"], where["status"]) == ("ride", "needs_details")
+    assert ask(client, "I have chest pain")["clarification"].startswith("Saathi cannot respond")
+    assert client.get("/api/hub/state").json()["requests"] == []
+
+
+def test_ask_uses_gemini_when_configured(client, monkeypatch):
+    from app.assistant import Draft
+
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.hub.draft_request", lambda message, profile: Draft(service="ride", destination="Park")
+    )
+    result = ask(client, "anything at all")
+    assert (result["service"], result["understood_by"]) == ("ride", "gemini")
+    assert result["input"]["destination"] == "Park"
+
+
+def test_caregiver_cannot_ask(app, client):
+    code = enable_care(client)
+    with TestClient(app) as helper:
+        assert helper.post("/api/hub/caregiver/join", json={"code": code}).status_code == 200
+        refused = helper.post(
+            "/api/hub/ask", json={"id": str(uuid4()), "message": "Take me to the park"}
+        )
+        assert refused.status_code == 403
+
+
 def test_channels_share_history_and_profile(client):
     profile = client.get("/api/hub/state").json()["profile"]
     profile.update(name="Demo user", large_text=True, language="hi-IN", budget=120)

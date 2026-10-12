@@ -59,13 +59,14 @@ Open http://127.0.0.1:5173. Vite proxies `/api` to the backend on port 8000. The
 With the backend and frontend running, open http://127.0.0.1:5173. The app is one phone-shaped column, so a narrow browser window looks like a phone, and on a wide screen it is centred.
 
 1. **Home**: greeting, the "no need to call family" line, and three service cards. Each card names the demo apps it compares.
-2. **Book a ride**: type a destination (or press Use microphone), then Show options. Rapido, Ola and Uber each quote a fare and arrival time, marked Demo.
-3. **Choose, review, book**: pick an option, read the review, then press Book with the chosen app. Nothing is booked before that button. The result shows a simulated reference.
-4. **Order food**: the same flow for Uber Eats, Swiggy and Zomato, following the diet, spice and budget saved in Profile.
-5. **Apps**: turn each demo app on or off. Switch Uber off and the next ride comparison leaves it out.
-6. **Activity**: every booking with its app, reference and status; cancel from here.
-7. **Family**: turn on caregiver approvals in Profile, create an invitation, then join from a private window. Requests above your limit, and every medicine request, wait for the caregiver.
-8. **Profile**: larger text, high contrast, Hindi voice language and preferences. The **About this demo** link in the footer lists what is real and what is simulated.
+2. **Just ask**: press the large microphone and say what you need, for example "Take me to Dr Mehta's clinic" or "मुझे खाना चाहिए", or type it underneath. Saathi works out whether it is a ride, food or medicine and opens the matching options to review. If the request is unclear it asks back instead of guessing. Routing uses Gemini when `SAATHI_GEMINI_API_KEY` is set, otherwise simple English and Hindi word matching (not AI). Voice needs a browser with speech recognition, such as Chrome, Edge or Safari, which may send the audio to its own servers.
+3. **Book a ride**: type a destination (or press Use microphone), then Show options. Rapido, Ola and Uber each quote a fare and arrival time, marked Demo.
+4. **Choose, review, book**: pick an option, read the review, then press Book with the chosen app. Nothing is booked before that button. The result shows a simulated reference.
+5. **Order food**: the same flow for Uber Eats, Swiggy and Zomato, following the diet, spice and budget saved in Profile.
+6. **Apps**: turn each demo app on or off. Switch Uber off and the next ride comparison leaves it out.
+7. **Activity**: every booking with its app, reference and status; cancel from here.
+8. **Family**: turn on caregiver approvals in Profile, create an invitation, then join from a private window. Requests above your limit, and every medicine request, wait for the caregiver.
+9. **Profile**: larger text, high contrast, Hindi voice language and preferences. The **About this demo** link in the footer lists what is real and what is simulated.
 
 ### Install it as an app
 

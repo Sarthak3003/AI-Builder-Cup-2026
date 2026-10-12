@@ -3,7 +3,7 @@ import type { Service } from './hub'
 
 export type Route =
   | { page: 'home' }
-  | { page: 'request'; service: Service }
+  | { page: 'request'; service: Service; proposal?: string }
   | { page: 'activity' }
   | { page: 'apps' }
   | { page: 'family' }
@@ -16,15 +16,16 @@ export const tabHref = (page: TabPage) => (page === 'home' ? '#/' : `#/${page}`)
 const plainPages = ['activity', 'apps', 'family', 'profile', 'about'] as const
 
 export function parseRoute(hash: string): Route {
-  const [page, argument] = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
-  if (page === 'request' && services.includes(argument as Service)) return { page, service: argument as Service }
+  const [page, argument, proposal] = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  if (page === 'request' && services.includes(argument as Service)) return proposal ? { page, service: argument as Service, proposal } : { page, service: argument as Service }
   const plain = plainPages.find((name) => name === page)
   return plain ? { page: plain } : { page: 'home' }
 }
 
 export function routeHref(route: Route): string {
   if (route.page === 'home') return '#/'
-  return route.page === 'request' ? `#/request/${route.service}` : `#/${route.page}`
+  if (route.page === 'request') return `#/request/${route.service}${route.proposal ? `/${route.proposal}` : ''}`
+  return `#/${route.page}`
 }
 
 export function useRoute(): [Route, (route: Route) => void] {

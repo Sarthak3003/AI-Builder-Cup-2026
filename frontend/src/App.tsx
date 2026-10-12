@@ -83,7 +83,7 @@ export default function App() {
 
   function screen(current: Hub) {
     switch (route.page) {
-      case 'request': return current.state.role === 'owner' ? <RequestScreen key={route.service} hub={current} service={route.service} /> : <Home hub={current} install={install} />
+      case 'request': return current.state.role === 'owner' ? <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} /> : <Home hub={current} install={install} />
       case 'activity': return <ActivityScreen hub={current} />
       case 'apps': return <AppsScreen hub={current} />
       case 'family': return <FamilyScreen hub={current} />

@@ -12,16 +12,17 @@ type Channel = 'app' | 'message' | 'voice'
 type Step = 'form' | 'options' | 'review' | 'done'
 const nouns: Record<Service, string> = { ride: 'ride', food: 'order', medicine: 'request' }
 
-export default function RequestScreen({ hub, service }: { hub: Hub; service: Service }) {
+export default function RequestScreen({ hub, service, proposalId }: { hub: Hub; service: Service; proposalId?: string }) {
   const { state, busy, run, refresh } = hub
   const profile = state.profile
+  const [handedOver] = useState(() => state.requests.find((item) => item.id === proposalId && item.service === service && item.status === 'proposed' && item.expires_at * 1000 > Date.now()) ?? null)
   const [engine, setEngine] = useState<'offline' | 'gemini'>('offline')
-  const [channel, setChannel] = useState<Channel>('app')
-  const [message, setMessage] = useState('')
-  const [destination, setDestination] = useState('')
+  const [channel, setChannel] = useState<Channel>(handedOver?.channel === 'voice' ? 'voice' : 'app')
+  const [message, setMessage] = useState(handedOver?.input?.message ?? '')
+  const [destination, setDestination] = useState(handedOver?.input?.destination ?? '')
   const [medicine, setMedicine] = useState('')
   const [budget, setBudget] = useState('')
-  const [proposal, setProposal] = useState<Proposal | null>(null)
+  const [proposal, setProposal] = useState<Proposal | null>(handedOver)
   const [selection, setSelection] = useState<Option | null>(null)
   const [receipt, setReceipt] = useState<Activity | null>(null)
   const [now] = useState(() => Date.now())
@@ -142,6 +143,7 @@ export default function RequestScreen({ hub, service }: { hub: Hub; service: Ser
             <h2 id="results-title" tabIndex={-1} ref={heading} className="step-title">{proposal.summary}</h2>
             <button className="secondary small" onClick={() => readAloud(proposal.clarification || proposal.summary)}>Read aloud</button>
           </div>
+          {proposal.input?.message ? <p className="heard">You asked: “{proposal.input.message}”</p> : null}
           {proposal.clarification ? (
             <p className="clarify">{proposal.clarification} {proposal.clarification.startsWith('Turn on') ? <a href="#/apps">Open Apps</a> : null}</p>
           ) : (

@@ -122,6 +122,32 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .demo-note a { color: var(--yellow-ink); font-weight: 600; }
 
 /* ---------- Home ---------- */
+.ask { align-items: center; text-align: center; gap: 14px; border: 2px solid var(--blue-tint); }
+.ask-title { font-size: 1.25em; color: var(--blue-ink); }
+.mic {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 6px 12px;
+  background: none; border: 0; border-radius: 24px; color: var(--blue-ink); font-size: 1.125em; font-weight: 700;
+}
+.mic-circle {
+  display: grid; place-items: center; width: 120px; height: 120px; border-radius: 50%;
+  background: var(--blue-strong); color: var(--on-dark);
+  box-shadow: 0 0 0 10px var(--blue-tint), 0 8px 24px rgba(26, 115, 232, 0.35);
+}
+.mic-circle svg { width: 56px; height: 56px; }
+.mic.listening { color: var(--red-strong); }
+.mic.listening .mic-circle { background: var(--red-strong); animation: mic-pulse 1.4s ease-out infinite; }
+.mic:disabled { cursor: progress; }
+.mic:disabled .mic-circle { background: var(--surface-2); color: var(--text-2); box-shadow: none; }
+.mic:focus-visible { outline: 3px solid var(--blue-ink); outline-offset: 4px; }
+@keyframes mic-pulse {
+  from { box-shadow: 0 0 0 0 rgba(197, 34, 31, 0.45); }
+  to { box-shadow: 0 0 0 24px rgba(197, 34, 31, 0); }
+}
+.ask-live { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.heard { font-size: 1.0625em; font-style: italic; }
+.ask-type { width: 100%; flex-direction: row; align-items: flex-end; gap: 10px; text-align: left; }
+.ask-type .field { flex: 1; min-width: 0; }
+
 .service-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .service-card {
   display: flex; align-items: center; gap: 16px; min-height: 96px; padding: 16px;
@@ -256,5 +282,5 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .badge { position: absolute; top: 2px; right: calc(50% - 32px); min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--red-strong); color: var(--on-dark); font-size: 0.75rem; line-height: 20px; text-align: center; }
 
 @media (display-mode: standalone) { .install { display: none; } }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } .mic.listening .mic-circle { animation: none; } }
 @media (min-width: 480px) { .form-grid { grid-template-columns: 1fr 1fr; } }

@@ -15,6 +15,7 @@ test.each([
   ['#/request/ride', { page: 'request', service: 'ride' }],
   ['#/request/food', { page: 'request', service: 'food' }],
   ['#/request/medicine', { page: 'request', service: 'medicine' }],
+  ['#/request/ride/abc-123', { page: 'request', service: 'ride', proposal: 'abc-123' }],
 ])('%s opens the right screen', (hash, route) => {
   expect(parseRoute(hash)).toEqual(route)
 })
@@ -24,7 +25,7 @@ test.each(['#/request', '#/request/taxi', '#/nope', '#main'])('%s falls back to 
 })
 
 test('addresses and routes round-trip', () => {
-  for (const route of [{ page: 'home' }, { page: 'activity' }, { page: 'request', service: 'food' }] as const) {
+  for (const route of [{ page: 'home' }, { page: 'activity' }, { page: 'request', service: 'food' }, { page: 'request', service: 'ride', proposal: 'abc' }] as const) {
     expect(parseRoute(routeHref(route))).toEqual(route)
   }
   expect(tabHref('home')).toBe('#/')

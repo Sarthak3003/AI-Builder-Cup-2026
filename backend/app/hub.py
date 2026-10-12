@@ -18,6 +18,7 @@ from app.accounts import verify_account
 from app.assistant import draft_request
 from app.config import Settings
 from app.hub_store import HubStore, initial_state
+from app.intent import EMERGENCY, EMERGENCY_WORDS, understand
 from app.providers import (
     NONE_ENABLED,
     PROVIDER_IDS,
@@ -279,20 +280,8 @@ def hub_router(config: Settings):
             options = []
             clarification = ""
             message = body.message.lower()
-            if any(
-                word in message
-                for word in [
-                    "emergency",
-                    "chest pain",
-                    "can't breathe",
-                    "cannot breathe",
-                    "आपातकाल",
-                ]
-            ):
-                clarification = (
-                    "Saathi cannot respond to emergencies. Contact local emergency "
-                    "services or a trusted person directly. No request was placed."
-                )
+            if any(word in message for word in EMERGENCY_WORDS):
+                clarification = EMERGENCY
             elif not available(body.service, enabled):
                 clarification = NONE_ENABLED[body.service]
             elif body.service == "food":
@@ -378,6 +367,33 @@ def hub_router(config: Settings):
             ),
             who,
         )
+
+    @router.post("/ask")
+    def ask(body: AssistantRequest, who=actor):
+        """One sentence in, a routed request out. Gemini if configured, else word matching."""
+        if os.environ.get("SAATHI_GEMINI_API_KEY"):
+            return {**assistant(body, who), "understood_by": "gemini"}
+        profile = mutate(who, lambda state: dict(state["profile"]), owner_only=True)
+        draft, question = understand(body.message, profile)
+        if draft is None or draft.clarification:
+            return {
+                "id": str(body.id),
+                "service": draft.service if draft else None,
+                "channel": body.channel,
+                "summary": "More details needed",
+                "clarification": draft.clarification if draft else question,
+                "options": [],
+                "status": "needs_details",
+                "expires_at": time.time(),
+                "understood_by": "keywords",
+            }
+        request = ServiceRequest(
+            id=body.id,
+            message=body.message,
+            channel=body.channel,
+            **draft.model_dump(exclude={"clarification"}),
+        )
+        return {**create(request, who), "understood_by": "keywords"}
 
     @router.post("/requests/{request_id}/confirm")
     def confirm(request_id: UUID, body: Confirm, who=actor):

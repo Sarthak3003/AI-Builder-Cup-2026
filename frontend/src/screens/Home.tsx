@@ -6,6 +6,7 @@ import { ChevronIcon } from '../icons'
 import { services } from '../route'
 import type { useInstall } from '../usePwa'
 import { InstallCard } from '../components/Banners'
+import AskSaathi from '../components/AskSaathi'
 import ServiceIcon from '../components/ServiceIcon'
 import type { Hub } from './hubType'
 
@@ -41,10 +42,12 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
         <p className="lead">Need a ride or a meal? Ask Saathi. There is no need to call family, and you always confirm first.</p>
       </section>
 
+      <AskSaathi hub={hub} />
+
       <InstallCard install={install} />
 
       <section aria-labelledby="services-title">
-        <h2 id="services-title" className="section-title">What do you need?</h2>
+        <h2 id="services-title" className="section-title">Or choose one</h2>
         <ul className="service-list">
           {services.map((service) => (
             <li key={service}>
