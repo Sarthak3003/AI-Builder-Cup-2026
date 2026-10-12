@@ -11,5 +11,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test-setup.ts'],
     restoreMocks: true,
+    // Real CSS text is needed only to check the design tokens; other styles stay stubbed.
+    css: { include: [/theme\.css(\?raw)?$/] },
   },
 })

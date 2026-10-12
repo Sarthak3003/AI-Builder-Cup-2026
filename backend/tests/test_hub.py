@@ -143,11 +143,11 @@ def test_clarifications_and_budget(client):
 
 def test_channels_share_history_and_profile(client):
     profile = client.get("/api/hub/state").json()["profile"]
-    profile.update(name="Demo user", large_text=True, language="hi-IN", budget=100)
+    profile.update(name="Demo user", large_text=True, language="hi-IN", budget=120)
     client.put("/api/hub/profile", json=profile)
     for channel in ["app", "message", "voice"]:
         proposal = propose(client, channel=channel)
-        assert [option["id"] for option in proposal["options"]] == ["khichdi"]
+        assert [option["id"] for option in proposal["options"]] == ["swiggy-khichdi"]
         confirm(client, proposal)
     state = client.get("/api/hub/state").json()
     assert state["profile"]["name"] == "Demo user"
@@ -169,6 +169,29 @@ def test_cross_site_requests_rejected(client):
         client.post("/api/hub/session", headers={"Origin": "https://evil.invalid"}).status_code
         == 403
     )
+
+
+@pytest.mark.parametrize("port", [5173, 4173])
+def test_local_dev_and_preview_origins_are_accepted(client, port):
+    # Vite's proxy rewrites Host, so both of its ports must be allow-listed in local mode.
+    result = client.post("/api/hub/session", headers={"Origin": f"http://127.0.0.1:{port}"})
+    assert result.status_code == 200
+
+
+def test_other_local_ports_are_still_refused(client):
+    result = client.post("/api/hub/session", headers={"Origin": "http://127.0.0.1:9999"})
+    assert result.status_code == 403
+
+
+def test_extra_origin_from_environment_is_accepted_and_others_are_not(tmp_path, monkeypatch):
+    # How a phone on the same Wi-Fi is allowed in: SAATHI_ALLOWED_ORIGINS names its address.
+    monkeypatch.setenv("SAATHI_LOCAL_DB", str(tmp_path / "origins.db"))
+    monkeypatch.setenv("SAATHI_ALLOWED_ORIGINS", "http://198.51.100.20:5173")
+    with TestClient(create_app(Settings(environment="test"))) as api:
+        phone = api.post("/api/hub/session", headers={"Origin": "http://198.51.100.20:5173"})
+        stranger = api.post("/api/hub/session", headers={"Origin": "http://198.51.100.21:5173"})
+    assert phone.status_code == 200
+    assert stranger.status_code == 403
 
 
 def test_reset_clears_history(client):
