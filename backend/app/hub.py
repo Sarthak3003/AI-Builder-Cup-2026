@@ -12,12 +12,23 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.accounts import verify_account
 from app.assistant import draft_request
 from app.config import Settings
 from app.hub_store import HubStore, initial_state
+from app.intent import EMERGENCY, EMERGENCY_WORDS, understand
+from app.providers import (
+    NONE_ENABLED,
+    PROVIDER_IDS,
+    available,
+    catalogue,
+    enabled_ids,
+    food_options,
+    medicine_options,
+    ride_options,
+)
 
 
 class Profile(BaseModel):
@@ -34,6 +45,16 @@ class Profile(BaseModel):
     approval_limit: int = Field(default=150, ge=0, le=10000)
     caregiver_enabled: bool = False
     medicines: list[str] = Field(default_factory=list, max_length=10)
+    enabled_providers: list[str] = Field(
+        default_factory=lambda: list(PROVIDER_IDS), max_length=len(PROVIDER_IDS)
+    )
+
+    @field_validator("enabled_providers")
+    @classmethod
+    def known_unique_apps(cls, value):
+        if len(set(value)) != len(value) or any(item not in PROVIDER_IDS for item in value):
+            raise ValueError("Choose each listed app at most once.")
+        return value
 
 
 class ServiceRequest(BaseModel):
@@ -118,7 +139,9 @@ def hub_router(config: Settings):
 
     allowed_origins = set(filter(None, os.environ.get("SAATHI_ALLOWED_ORIGINS", "").split(",")))
     if config.environment in {"local", "test"}:
-        allowed_origins.update({"http://127.0.0.1:5173", "http://localhost:5173"})
+        # Vite's dev server (5173) and its production-build preview (4173) both proxy /api.
+        for port in (5173, 4173):
+            allowed_origins.update({f"http://127.0.0.1:{port}", f"http://localhost:{port}"})
 
     def guard(request: Request):
         if request.method not in {"GET", "HEAD"}:
@@ -162,8 +185,9 @@ def hub_router(config: Settings):
             raise HTTPException(503, "Could not save your changes. Please retry.") from None
 
     def public(state, who):
+        profile = {**state["profile"], "enabled_providers": enabled_ids(state["profile"])}
         return {
-            "profile": state["profile"],
+            "profile": profile,
             "activity": state["activity"],
             "messages": state["messages"],
             "audit": state["audit"],
@@ -172,6 +196,7 @@ def hub_router(config: Settings):
             "storage": store.mode,
             "mode": "offline-demo",
             "providers": "simulated",
+            "catalogue": catalogue(),
         }
 
     def cookie(response, who):
@@ -251,88 +276,28 @@ def hub_router(config: Settings):
             if body.mild is not None:
                 profile["mild"] = body.mild
             budget = body.budget if body.budget is not None else profile["budget"]
+            enabled = enabled_ids(profile)
             options = []
             clarification = ""
             message = body.message.lower()
-            if any(
-                word in message
-                for word in [
-                    "emergency",
-                    "chest pain",
-                    "can't breathe",
-                    "cannot breathe",
-                    "आपातकाल",
-                ]
-            ):
-                clarification = (
-                    "Saathi cannot respond to emergencies. Contact local emergency "
-                    "services or a trusted person directly. No request was placed."
-                )
+            if any(word in message for word in EMERGENCY_WORDS):
+                clarification = EMERGENCY
+            elif not available(body.service, enabled):
+                clarification = NONE_ENABLED[body.service]
             elif body.service == "food":
                 if any(word in message for word in ["allerg", "diabet", "एलर्जी"]):
                     clarification = "Demo meals cannot verify medical diets or allergens."
                 else:
-                    options = [
-                        {
-                            "id": "dal",
-                            "name": "Dal and rice",
-                            "price": 120,
-                            "detail": "Vegetarian, mild. Demo kitchen.",
-                        },
-                        {
-                            "id": "khichdi",
-                            "name": "Vegetable khichdi",
-                            "price": 100,
-                            "detail": "Vegetarian, mild. Demo kitchen.",
-                        },
-                    ]
-                    if not profile["mild"]:
-                        options.append(
-                            {
-                                "id": "paneer",
-                                "name": "Paneer meal",
-                                "price": 180,
-                                "detail": "Vegetarian, medium spice. Demo kitchen.",
-                            }
-                        )
-                    if not profile["vegetarian"] and not profile["mild"]:
-                        options.append(
-                            {
-                                "id": "chicken",
-                                "name": "Chicken and rice",
-                                "price": 200,
-                                "detail": "Non-vegetarian, medium spice. Demo kitchen.",
-                            }
-                        )
+                    options = food_options(enabled, profile["vegetarian"], profile["mild"], budget)
             elif body.service == "ride":
                 if not body.destination:
                     clarification = "Enter a destination before comparing demo rides."
                 else:
-                    options = [
-                        {
-                            "id": "auto",
-                            "name": "Demo auto",
-                            "price": 90,
-                            "detail": f"{profile['home']} to {body.destination}. Sample fare.",
-                        },
-                        {
-                            "id": "cab",
-                            "name": "Demo cab",
-                            "price": 180,
-                            "detail": f"{profile['home']} to {body.destination}. Sample fare.",
-                        },
-                    ]
+                    options = ride_options(enabled, profile["home"], body.destination)
             elif body.medicine not in profile["medicines"]:
                 clarification = "Choose a medicine label already saved in your profile."
             else:
-                options = [
-                    {
-                        "id": "pharmacy",
-                        "name": body.medicine,
-                        "price": 80,
-                        "detail": "Demo pharmacy request. No prescription validation or supply.",
-                    }
-                ]
+                options = medicine_options(enabled, body.medicine)
             options = [option for option in options if option["price"] <= budget]
             if not options and not clarification:
                 clarification = "No demo options fit your budget. Adjust it and try again."
@@ -403,6 +368,33 @@ def hub_router(config: Settings):
             who,
         )
 
+    @router.post("/ask")
+    def ask(body: AssistantRequest, who=actor):
+        """One sentence in, a routed request out. Gemini if configured, else word matching."""
+        if os.environ.get("SAATHI_GEMINI_API_KEY"):
+            return {**assistant(body, who), "understood_by": "gemini"}
+        profile = mutate(who, lambda state: dict(state["profile"]), owner_only=True)
+        draft, question = understand(body.message, profile)
+        if draft is None or draft.clarification:
+            return {
+                "id": str(body.id),
+                "service": draft.service if draft else None,
+                "channel": body.channel,
+                "summary": "More details needed",
+                "clarification": draft.clarification if draft else question,
+                "options": [],
+                "status": "needs_details",
+                "expires_at": time.time(),
+                "understood_by": "keywords",
+            }
+        request = ServiceRequest(
+            id=body.id,
+            message=body.message,
+            channel=body.channel,
+            **draft.model_dump(exclude={"clarification"}),
+        )
+        return {**create(request, who), "understood_by": "keywords"}
+
     @router.post("/requests/{request_id}/confirm")
     def confirm(request_id: UUID, body: Confirm, who=actor):
         def save(state):
@@ -423,6 +415,10 @@ def hub_router(config: Settings):
             if not option:
                 raise HTTPException(400, "Choose an offered option.")
             p = state["profile"]
+            if option.get("provider") and option["provider"] not in enabled_ids(p):
+                raise HTTPException(
+                    409, "That app is turned off in Apps. Turn it on or start again."
+                )
             needs_approval = p["caregiver_enabled"] and (
                 option["price"] > p["approval_limit"] or proposal["service"] == "medicine"
             )
@@ -431,6 +427,8 @@ def hub_router(config: Settings):
                 "service": proposal["service"],
                 "channel": proposal["channel"],
                 "option": option,
+                "reference": f"SIM-{rid[:8].upper()}",
+                "simulated": True,
                 "status": "awaiting_approval" if needs_approval else "simulated_confirmed",
                 "created_at": time.time(),
             }
