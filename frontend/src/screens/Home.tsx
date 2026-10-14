@@ -8,6 +8,7 @@ import type { useInstall } from '../usePwa'
 import { InstallCard } from '../components/Banners'
 import AskSaathi from '../components/AskSaathi'
 import ServiceIcon from '../components/ServiceIcon'
+import SimpleToggle from '../components/SimpleToggle'
 import type { Hub } from './hubType'
 
 export default function Home({ hub, install }: { hub: Hub; install: ReturnType<typeof useInstall> }) {
@@ -41,6 +42,8 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
         <h1>{words.hello(state.profile.name)}<span className="tagline">{words.tagline}</span></h1>
         <p className="lead">Need a ride or a meal? Ask Saathi. There is no need to call family, and you always confirm first.</p>
       </section>
+
+      <SimpleToggle hub={hub} />
 
       <AskSaathi hub={hub} />
 

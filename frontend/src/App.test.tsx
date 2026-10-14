@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
-import type { Activity, Option, Proposal, Service } from './hub'
+import type { Activity, Option, Profile, Proposal, Service } from './hub'
 import { makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
 
 // jsdom cannot decode audio; the real conversion is covered in lib.test.ts.
@@ -393,6 +393,75 @@ test('Hindi labels, larger text and high contrast follow the saved profile', asy
   expect(screen.getByText('नमस्ते, Friend।')).toBeInTheDocument()
   expect(document.documentElement.lang).toBe('hi')
   expect(document.querySelector('.app')).toHaveClass('large-text', 'high-contrast')
+})
+
+test('the simplified view switch strips Home down to the mic, three tiles and a way back', async () => {
+  vi.stubGlobal('SpeechRecognition', FakeRecognition)
+  const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: body as Profile }) })
+  render(<App />)
+  const toggle = await screen.findByRole('switch', { name: 'Enable simplified view' })
+  expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await userEvent.click(toggle)
+
+  expect(await screen.findByRole('link', { name: 'Ride' })).toHaveAttribute('href', '#/request/ride')
+  expect(screen.getByRole('link', { name: 'Food' })).toHaveAttribute('href', '#/request/food')
+  expect(screen.getByRole('link', { name: 'Medicine' })).toHaveAttribute('href', '#/request/medicine')
+  expect(screen.getByRole('button', { name: 'Tap and speak' })).toBeInTheDocument()
+  for (const gone of [/Or choose one/, /A prototype, clearly marked/, /One conversation/, /For example/, /About this demo/]) {
+    expect(screen.queryByText(gone)).not.toBeInTheDocument()
+  }
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Open profile' })).not.toBeInTheDocument()
+  const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Activity'])
+  expect(screen.getByText('Not for emergencies.')).toBeInTheDocument()
+  expect(screen.getByText('Prototype')).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Show full view' }))
+  expect(await screen.findByRole('switch', { name: 'Enable simplified view' })).toHaveAttribute('aria-checked', 'false')
+  const saves = calls.filter((call) => call.method === 'PUT').map((call) => (call.body as Profile).simple)
+  expect(saves).toEqual([true, false])
+})
+
+test('in simplified view a booking is one field, big choices, "Book this?" and Done, still marked as demo', async () => {
+  const state = makeState()
+  state.profile.simple = true
+  const calls = stubApi({ 'POST /requests': () => proposalOf('ride', [rapidoRide, uberRide]), 'POST /requests/*/confirm': () => orderOf(uberRide) }, state)
+  window.location.hash = '#/request/ride'
+  render(<App />)
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
+  expect(screen.getAllByRole('textbox')).toHaveLength(1)
+  expect(screen.queryByText('More options')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Use microphone' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
+
+  expect(await screen.findByRole('heading', { name: 'Pick one' })).toBeInTheDocument()
+  expect(screen.queryByText(/Sample fare/)).not.toBeInTheDocument()
+  expect(screen.getAllByText('Demo').length).toBeGreaterThanOrEqual(2)
+  await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
+  expect(await screen.findByRole('heading', { name: 'Book this?' })).toBeInTheDocument()
+  expect(screen.getByText('Demo only. Nothing is really booked or paid.')).toBeInTheDocument()
+  expect(confirmCalls(calls)).toHaveLength(0)
+  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+
+  expect(await screen.findByRole('heading', { name: 'Booked' })).toBeInTheDocument()
+  expect(confirmCalls(calls)).toHaveLength(1)
+  expect(screen.getByRole('link', { name: 'Done' })).toHaveAttribute('href', '#/')
+  expect(screen.queryByText('SIM-11111111')).not.toBeInTheDocument()
+})
+
+test('simplified Activity shows only what was booked, its status and Cancel', async () => {
+  const state = makeState({ activity: [orderOf(uberRide)] })
+  state.profile.simple = true
+  stubApi({}, state)
+  window.location.hash = '#/activity'
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Uber Go' })).toBeInTheDocument()
+  expect(screen.getByText('Booked · demo only')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Cancel request' })).toBeInTheDocument()
+  for (const gone of [/Activity audit/, /SIM-11111111/, /Sample fare/, /Refresh activity/, /whichever way you ask/]) {
+    expect(screen.queryByText(gone)).not.toBeInTheDocument()
+  }
 })
 
 test('the skip link moves focus to the content without changing the screen', async () => {

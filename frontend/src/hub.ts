@@ -1,5 +1,5 @@
 export type Profile = {
-  name: string; language: 'en-IN' | 'hi-IN'; large_text: boolean; high_contrast: boolean;
+  name: string; language: 'en-IN' | 'hi-IN'; large_text: boolean; high_contrast: boolean; simple?: boolean;
   vegetarian: boolean; mild: boolean; budget: number; home: string; caregiver_name: string;
   approval_limit: number; caregiver_enabled: boolean; medicines: string[]; enabled_providers: string[];
 }

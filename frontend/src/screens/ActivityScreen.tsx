@@ -1,8 +1,16 @@
 import ActivityList from '../components/ActivityList'
 import type { Hub } from './hubType'
 
-export default function ActivityScreen({ hub }: { hub: Hub }) {
+export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simple?: boolean }) {
   const { state, busy, run, refresh } = hub
+  if (simple) {
+    return (
+      <>
+        <h1 className="page-title">Your activity</h1>
+        <ActivityList hub={hub} items={state.activity} simple empty={<p>Nothing yet.</p>} />
+      </>
+    )
+  }
   return (
     <>
       <h1 className="page-title">Your activity</h1>

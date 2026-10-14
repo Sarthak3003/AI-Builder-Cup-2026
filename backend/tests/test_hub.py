@@ -338,6 +338,15 @@ def test_cookie_tamper_rejected(app):
         assert client.get("/api/hub/state").status_code == 401
 
 
+def test_simplified_view_is_saved_and_older_profiles_default_to_full(client):
+    profile = client.get("/api/hub/state").json()["profile"]
+    assert profile["simple"] is False
+    saved = client.put("/api/hub/profile", json={**profile, "simple": True}).json()
+    assert saved["profile"]["simple"] is True
+    older = {key: value for key, value in profile.items() if key != "simple"}
+    assert client.put("/api/hub/profile", json=older).json()["profile"]["simple"] is False
+
+
 def test_local_data_survives_app_restart(client):
     confirm(client, propose(client))
     cookie = client.cookies.get("__session")

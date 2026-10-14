@@ -39,6 +39,7 @@ class Profile(BaseModel):
     language: Literal["en-IN", "hi-IN"] = "en-IN"
     large_text: bool = False
     high_contrast: bool = False
+    simple: bool = False
     vegetarian: bool = True
     mild: bool = True
     budget: int = Field(default=200, ge=0, le=10000)
