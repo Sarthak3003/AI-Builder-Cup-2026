@@ -1,7 +1,9 @@
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -190,6 +192,76 @@ def test_ask_uses_gemini_when_configured(client, monkeypatch):
     assert result["input"]["destination"] == "Park"
 
 
+def test_ask_falls_back_to_word_matching_when_gemini_fails(client, monkeypatch):
+    def broken(message, profile):
+        raise HTTPException(502, "Gemini could not understand this request. Please retry.")
+
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr("app.hub.draft_request", broken)
+    result = ask(client, "Take me to the park")
+    assert (result["service"], result["understood_by"]) == ("ride", "keywords")
+    assert client.get("/api/hub/state").json()["gemini"] is True
+
+
+WAV = b"RIFF\x24\x00\x00\x00WAVEfmt " + bytes(48)
+
+
+def speak(client, audio=WAV):
+    body = {"id": str(uuid4()), "audio": base64.b64encode(audio).decode()}
+    return client.post("/api/hub/ask/voice", json=body)
+
+
+def test_voice_needs_gemini(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    assert client.get("/api/hub/state").json()["gemini"] is False
+    assert speak(client).status_code == 503
+
+
+def test_gemini_hears_the_recording_and_routes_it(client, monkeypatch):
+    from app.assistant import Heard
+
+    heard = []
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.hub.hear_request",
+        lambda audio, mime, profile: (
+            heard.append((audio, mime))
+            or Heard(service="ride", destination="the park", transcript="मुझे पार्क जाना है")
+        ),
+    )
+    result = speak(client).json()
+    assert heard == [(WAV, "audio/wav")]
+    assert (result["service"], result["status"], result["understood_by"]) == (
+        "ride",
+        "proposed",
+        "gemini",
+    )
+    assert (result["transcript"], result["channel"]) == ("मुझे पार्क जाना है", "voice")
+    assert result["input"]["message"] == "मुझे पार्क जाना है"
+    assert client.get("/api/hub/state").json()["activity"] == []
+
+
+def test_silent_or_unclear_recording_is_asked_again(client, monkeypatch):
+    from app.assistant import Heard
+
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.hub.hear_request", lambda audio, mime, profile: Heard(service="ride", transcript="")
+    )
+    result = speak(client).json()
+    assert result["status"] == "needs_details"
+    assert result["clarification"] == "Sorry, I could not hear that. Please try again."
+
+
+def test_voice_rejects_anything_but_wav(client, monkeypatch):
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    assert speak(client, b"OggS" + bytes(60)).status_code == 422
+    bad = {"id": str(uuid4()), "audio": "not base64!" * 10}
+    assert client.post("/api/hub/ask/voice", json=bad).status_code == 422
+    other = {"id": str(uuid4()), "audio": "A" * 100, "mime_type": "audio/webm"}
+    assert client.post("/api/hub/ask/voice", json=other).status_code == 422
+
+
 def test_caregiver_cannot_ask(app, client):
     code = enable_care(client)
     with TestClient(app) as helper:
@@ -264,6 +336,15 @@ def test_cookie_tamper_rejected(app):
     with TestClient(app) as client:
         client.cookies.set("__session", "forged.token")
         assert client.get("/api/hub/state").status_code == 401
+
+
+def test_simplified_view_is_saved_and_older_profiles_default_to_full(client):
+    profile = client.get("/api/hub/state").json()["profile"]
+    assert profile["simple"] is False
+    saved = client.put("/api/hub/profile", json={**profile, "simple": True}).json()
+    assert saved["profile"]["simple"] is True
+    older = {key: value for key, value in profile.items() if key != "simple"}
+    assert client.put("/api/hub/profile", json=older).json()["profile"]["simple"] is False
 
 
 def test_local_data_survives_app_restart(client):

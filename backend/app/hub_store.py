@@ -19,6 +19,7 @@ def initial_state():
             "language": "en-IN",
             "large_text": False,
             "high_contrast": False,
+            "simple": False,
             "vegetarian": True,
             "mild": True,
             "budget": 200,

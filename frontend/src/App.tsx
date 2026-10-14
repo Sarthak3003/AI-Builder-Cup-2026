@@ -18,6 +18,7 @@ import FamilyScreen from './screens/FamilyScreen'
 import Home from './screens/Home'
 import ProfileScreen from './screens/ProfileScreen'
 import RequestScreen from './screens/RequestScreen'
+import SimpleHome from './screens/SimpleHome'
 import type { Hub } from './screens/hubType'
 import './theme.css'
 import './App.css'
@@ -72,36 +73,39 @@ export default function App() {
 
   const hub: Hub | null = state ? { state, busy, online, run, refresh, setState, notify: setNotice } : null
   const words = wordsFor(language)
+  const simple = Boolean(state?.profile.simple) && state?.role === 'owner'
   const pending = state?.activity.filter((item) => item.status === 'awaiting_approval').length ?? 0
-  const tabs: Tab[] = [
+  const allTabs: Tab[] = [
     { page: 'home', label: words.home, icon: <HomeIcon /> },
     { page: 'activity', label: words.activity, icon: <ActivityIcon /> },
     { page: 'apps', label: words.apps, icon: <AppsIcon /> },
     { page: 'family', label: words.family, icon: <FamilyIcon />, badge: pending },
     { page: 'profile', label: words.profile, icon: <ProfileIcon /> },
   ]
+  const tabs = simple ? allTabs.slice(0, 2) : allTabs
 
   function screen(current: Hub) {
+    const home = simple ? <SimpleHome hub={current} /> : <Home hub={current} install={install} />
     switch (route.page) {
-      case 'request': return current.state.role === 'owner' ? <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} /> : <Home hub={current} install={install} />
-      case 'activity': return <ActivityScreen hub={current} />
+      case 'request': return current.state.role === 'owner' ? <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} simple={simple} /> : home
+      case 'activity': return <ActivityScreen hub={current} simple={simple} />
       case 'apps': return <AppsScreen hub={current} />
       case 'family': return <FamilyScreen hub={current} />
       case 'profile': return <ProfileScreen hub={current} install={install} />
       case 'about': return <AboutScreen hub={current} />
-      default: return <Home hub={current} install={install} />
+      default: return home
     }
   }
 
   return (
-    <div className={`app${state?.profile.large_text ? ' large-text' : ''}${state?.profile.high_contrast ? ' high-contrast' : ''}`}>
+    <div className={`app${state?.profile.large_text ? ' large-text' : ''}${state?.profile.high_contrast ? ' high-contrast' : ''}${simple ? ' simple' : ''}`}>
       <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); main.current?.focus() }}>Skip to content</a>
       <div className="frame">
         <OfflineBanner online={online} />
         <header className="topbar">
           <a className="brand" href="#/" aria-label="Saathi home"><LogoMark size={34} /><span className="wordmark">saathi</span></a>
           <span className="chip demo">Prototype</span>
-          <a className="avatar" href="#/profile" aria-label="Open profile">{state?.profile.name.slice(0, 1) ?? 'S'}</a>
+          {simple ? null : <a className="avatar" href="#/profile" aria-label="Open profile">{state?.profile.name.slice(0, 1) ?? 'S'}</a>}
         </header>
 
         <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
@@ -126,9 +130,13 @@ export default function App() {
         </main>
 
         <footer className="footnote">
-          <ConnectionStatus />
-          <p>Saathi cannot respond to emergencies. Contact local emergency services directly.</p>
-          <a href="#/about">About this demo</a>
+          {simple ? <p>{words.notEmergency}</p> : (
+            <>
+              <ConnectionStatus />
+              <p>Saathi cannot respond to emergencies. Contact local emergency services directly.</p>
+              <a href="#/about">About this demo</a>
+            </>
+          )}
         </footer>
         {hub ? <BottomNav route={route} tabs={tabs} /> : null}
       </div>

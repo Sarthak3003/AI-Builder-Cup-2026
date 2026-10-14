@@ -14,7 +14,7 @@ export const catalogue: CatalogueApp[] = [
 export function makeState(overrides: Partial<HubState> = {}): HubState {
   return {
     profile: {
-      name: 'Friend', language: 'en-IN', large_text: false, high_contrast: false, vegetarian: true, mild: true, budget: 200,
+      name: 'Friend', language: 'en-IN', large_text: false, high_contrast: false, simple: false, vegetarian: true, mild: true, budget: 200,
       home: 'Demo home', caregiver_name: '', approval_limit: 150, caregiver_enabled: false, medicines: ['Saved medicine A'],
       enabled_providers: catalogue.map((app) => app.id),
     },
