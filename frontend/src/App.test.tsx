@@ -5,12 +5,16 @@ import App from './App'
 import type { Activity, Option, Proposal, Service } from './hub'
 import { makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
 
+// jsdom cannot decode audio; the real conversion is covered in lib.test.ts.
+vi.mock('./wav', async (original) => ({ ...(await original<typeof import('./wav')>()), toWav: async () => new TextEncoder().encode('RIFF').buffer }))
+
 beforeEach(() => {
   window.history.replaceState(null, '', '/')
 })
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
 const rapidoRide = { id: 'rapido-auto', provider: 'rapido', provider_name: 'Rapido', name: 'Rapido Auto', price: 90, eta_min: 3, simulated: true, detail: 'Demo home to Clinic · Sample fare' }
@@ -132,6 +136,72 @@ test('the microphone speaks Hindi when the profile does', async () => {
   render(<App />)
   await userEvent.click(await screen.findByRole('button', { name: 'दबाएँ और बोलें' }))
   expect(FakeRecognition.last?.lang).toBe('hi-IN')
+})
+
+class FakeRecorder {
+  static last: FakeRecorder | null = null
+  state = 'inactive'
+  mimeType = 'audio/webm'
+  ondataavailable: ((event: { data: Blob }) => void) | null = null
+  onstop: (() => void) | null = null
+  constructor() { FakeRecorder.last = this }
+  start() { this.state = 'recording' }
+  stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['voice']) }); this.onstop?.() }
+}
+function fakeMicrophone(allowed = true) {
+  const release = vi.fn()
+  FakeRecorder.last = null
+  const getUserMedia = vi.fn(async () => {
+    if (!allowed) throw new DOMException('denied', 'NotAllowedError')
+    return { getTracks: () => [{ stop: release }] }
+  })
+  vi.stubGlobal('MediaRecorder', FakeRecorder)
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+  return release
+}
+
+test('with Gemini on, the microphone records, Gemini hears and routes it, and nothing is booked yet', async () => {
+  const release = fakeMicrophone()
+  const said = 'मुझे क्लिनिक जाना है'
+  const heardRide: Proposal = { ...routedRide, input: { message: said, destination: 'क्लिनिक' } }
+  const calls = stubApi({
+    'POST /ask/voice': () => ({ ...heardRide, understood_by: 'gemini', transcript: said }),
+    'GET /state': () => makeState({ gemini: true, requests: [heardRide] }),
+  }, makeState({ gemini: true }))
+  render(<App />)
+  expect(await screen.findByText(/Gemini listens · your recording is sent to Google/)).toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: 'Tap and speak' }))
+  expect(FakeRecorder.last?.state).toBe('recording')
+  await userEvent.click(await screen.findByRole('button', { name: 'Listening… tap to stop' }))
+
+  expect(await screen.findByRole('heading', { name: 'Ride options within ₹200' })).toBeInTheDocument()
+  expect(screen.getByText(`You asked: “${said}”`)).toBeInTheDocument()
+  expect(release).toHaveBeenCalled()
+  const voice = calls.filter((call) => call.url.endsWith('/ask/voice'))
+  expect(voice.map((call) => call.body)).toEqual([{ id: expect.any(String), audio: 'UklGRg==' }])
+  expect(calls.some((call) => call.url.endsWith('/hub/ask'))).toBe(false)
+  expect(confirmCalls(calls)).toHaveLength(0)
+})
+
+test('with Gemini on, a refused microphone says so and nothing is sent', async () => {
+  fakeMicrophone(false)
+  const calls = stubApi({}, makeState({ gemini: true }))
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Tap and speak' }))
+  expect(await screen.findByText(/Microphone permission was refused/)).toBeInTheDocument()
+  expect(calls.some((call) => call.url.includes('/ask'))).toBe(false)
+})
+
+test('without Gemini the microphone keeps using the browser and says nothing about Google', async () => {
+  fakeMicrophone()
+  vi.stubGlobal('SpeechRecognition', FakeRecognition)
+  stubApi()
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Tap and speak' }))
+  expect(FakeRecognition.last?.start).toHaveBeenCalled()
+  expect(FakeRecorder.last).toBeNull()
+  expect(screen.queryByText(/Gemini listens/)).not.toBeInTheDocument()
 })
 
 test('bottom navigation has five tabs and marks the current page', async () => {

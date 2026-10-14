@@ -1,6 +1,7 @@
 """Shared local service workflows. External providers are always simulated."""
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -15,7 +16,8 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.accounts import verify_account
-from app.assistant import draft_request
+from app.assistant import configured as gemini_configured
+from app.assistant import draft_request, hear_request
 from app.config import Settings
 from app.hub_store import HubStore, initial_state
 from app.intent import EMERGENCY, EMERGENCY_WORDS, understand
@@ -74,6 +76,14 @@ class AssistantRequest(BaseModel):
     id: UUID
     message: str = Field(min_length=3, max_length=1000)
     channel: Literal["app", "message", "voice"] = "app"
+
+
+class VoiceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    # About 30 seconds of 16 kHz mono WAV, base64-encoded.
+    audio: str = Field(min_length=64, max_length=1_400_000)
+    mime_type: Literal["audio/wav"] = "audio/wav"
 
 
 class Confirm(BaseModel):
@@ -197,6 +207,7 @@ def hub_router(config: Settings):
             "mode": "offline-demo",
             "providers": "simulated",
             "catalogue": catalogue(),
+            "gemini": gemini_configured(),
         }
 
     def cookie(response, who):
@@ -334,18 +345,18 @@ def hub_router(config: Settings):
 
         return mutate(who, propose, owner_only=True)
 
+    def ai_profile(state):
+        attempts = state.get("ai_attempts", [])
+        attempts = [stamp for stamp in attempts if time.time() - stamp < 60]
+        if len(attempts) >= 5:
+            raise HTTPException(429, "Please wait a minute before another AI request.")
+        attempts.append(time.time())
+        state["ai_attempts"] = attempts
+        return dict(state["profile"])
+
     @router.post("/assistant")
     def assistant(body: AssistantRequest, who=actor):
-        def context(state):
-            attempts = state.get("ai_attempts", [])
-            attempts = [stamp for stamp in attempts if time.time() - stamp < 60]
-            if len(attempts) >= 5:
-                raise HTTPException(429, "Please wait a minute before another AI request.")
-            attempts.append(time.time())
-            state["ai_attempts"] = attempts
-            return dict(state["profile"])
-
-        profile = mutate(who, context, True)
+        profile = mutate(who, ai_profile, True)
         draft = draft_request(body.message, profile)
         if draft.clarification:
             return {
@@ -368,32 +379,59 @@ def hub_router(config: Settings):
             who,
         )
 
-    @router.post("/ask")
-    def ask(body: AssistantRequest, who=actor):
-        """One sentence in, a routed request out. Gemini if configured, else word matching."""
-        if os.environ.get("SAATHI_GEMINI_API_KEY"):
-            return {**assistant(body, who), "understood_by": "gemini"}
-        profile = mutate(who, lambda state: dict(state["profile"]), owner_only=True)
-        draft, question = understand(body.message, profile)
+    def routed(request_id, message, channel, draft, question, by, who):
         if draft is None or draft.clarification:
             return {
-                "id": str(body.id),
+                "id": str(request_id),
                 "service": draft.service if draft else None,
-                "channel": body.channel,
+                "channel": channel,
                 "summary": "More details needed",
                 "clarification": draft.clarification if draft else question,
                 "options": [],
                 "status": "needs_details",
                 "expires_at": time.time(),
-                "understood_by": "keywords",
+                "understood_by": by,
+                "transcript": message,
             }
+        fields = {"service", "destination", "medicine", "budget", "vegetarian", "mild"}
         request = ServiceRequest(
-            id=body.id,
-            message=body.message,
-            channel=body.channel,
-            **draft.model_dump(exclude={"clarification"}),
+            id=request_id, message=message, channel=channel, **draft.model_dump(include=fields)
         )
-        return {**create(request, who), "understood_by": "keywords"}
+        return {**create(request, who), "understood_by": by, "transcript": message}
+
+    @router.post("/ask")
+    def ask(body: AssistantRequest, who=actor):
+        """One sentence in, a routed request out. Gemini if configured, else word matching."""
+        if gemini_configured():
+            profile = mutate(who, ai_profile, owner_only=True)
+            try:
+                draft = draft_request(body.message, profile)
+                return routed(body.id, body.message, body.channel, draft, "", "gemini", who)
+            except HTTPException as failure:
+                if failure.status_code != 502:
+                    raise
+        else:
+            profile = mutate(who, lambda state: dict(state["profile"]), owner_only=True)
+        draft, question = understand(body.message, profile)
+        return routed(body.id, body.message, body.channel, draft, question, "keywords", who)
+
+    @router.post("/ask/voice")
+    def ask_voice(body: VoiceRequest, who=actor):
+        """A short WAV recording in; Gemini transcribes and routes it."""
+        if not gemini_configured():
+            raise HTTPException(503, "Gemini is not configured, so voice uses the browser.")
+        try:
+            audio = base64.b64decode(body.audio, validate=True)
+        except binascii.Error:
+            raise HTTPException(422, "Send the recording as base64 WAV audio.") from None
+        if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+            raise HTTPException(422, "Send the recording as base64 WAV audio.")
+        profile = mutate(who, ai_profile, owner_only=True)
+        heard = hear_request(audio, body.mime_type, profile)
+        transcript = heard.transcript.strip()
+        if not transcript and not heard.clarification:
+            heard.clarification = "Sorry, I could not hear that. Please try again."
+        return routed(body.id, transcript, "voice", heard, "", "gemini", who)
 
     @router.post("/requests/{request_id}/confirm")
     def confirm(request_id: UUID, body: Confirm, who=actor):

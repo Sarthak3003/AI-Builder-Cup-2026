@@ -14,7 +14,7 @@ No payments, real ordering or delivery occur. Voice, authentication and public h
 ```powershell
 $env:SAATHI_FIRESTORE_MODE = 'emulator'
 $env:FIRESTORE_EMULATOR_HOST = '127.0.0.1:8085'
-$env:SAATHI_GEMINI_MODEL = 'gemini-2.5-flash'
+$env:SAATHI_GEMINI_MODEL = 'gemini-3.8-flash'
 $secret = Read-Host 'Gemini API key' -AsSecureString
 $env:SAATHI_GEMINI_API_KEY = [System.Net.NetworkCredential]::new('', $secret).Password
 & .venv/Scripts/python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000

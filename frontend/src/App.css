@@ -110,6 +110,7 @@ form { display: flex; flex-direction: column; gap: 16px; }
 
 .chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 0.75em; font-weight: 600; letter-spacing: 0.02em; }
 .chip.demo { background: var(--yellow-tint); color: var(--yellow-ink); }
+.chip.gemini { background: var(--blue-tint); color: var(--blue-ink); padding: 4px 12px; text-wrap: balance; }
 
 .error { background: var(--red-tint); color: var(--red-strong); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .notice { background: var(--green-tint); color: var(--green-strong); border-radius: var(--radius-lg); padding: 14px 16px; font-weight: 600; }

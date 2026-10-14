@@ -10,9 +10,9 @@ export type Option = {
 }
 export type CatalogueApp = { id: string; name: string; service: Service; blurb: string; simulated: boolean }
 export type Proposal = { id: string; service: Service; channel: string; options: Option[]; clarification: string; summary: string; status: string; expires_at: number; input?: { message?: string; destination?: string } }
-export type AskResult = Omit<Proposal, 'service'> & { service: Service | null; understood_by: 'keywords' | 'gemini' }
+export type AskResult = Omit<Proposal, 'service'> & { service: Service | null; understood_by: 'keywords' | 'gemini'; transcript?: string }
 export type Activity = { id: string; service: Service; channel: string; option: Option; status: string; created_at: number; reference?: string; simulated?: boolean }
-export type HubState = { profile: Profile; role: 'owner' | 'caregiver'; storage: string; catalogue: CatalogueApp[]; activity: Activity[]; requests: Proposal[]; messages: { role: string; text: string; channel: string }[]; audit: { event: string; request_id: string; at: number }[] }
+export type HubState = { profile: Profile; role: 'owner' | 'caregiver'; storage: string; gemini?: boolean; catalogue: CatalogueApp[]; activity: Activity[]; requests: Proposal[]; messages: { role: string; text: string; channel: string }[]; audit: { event: string; request_id: string; at: number }[] }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api/hub${path}`, { method, credentials: 'same-origin',

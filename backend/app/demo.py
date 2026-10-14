@@ -14,6 +14,7 @@ from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 from pydantic import BaseModel, Field
 
+from app.assistant import DEFAULT_MODEL
 from app.config import Settings
 
 CATALOG = [
@@ -58,7 +59,7 @@ def interpret(message: str) -> Interpretation:
     key = os.environ.get("SAATHI_GEMINI_API_KEY")
     if not key:
         raise HTTPException(503, "Gemini is not configured yet. Add the API key on the server.")
-    model = os.environ.get("SAATHI_GEMINI_MODEL", "gemini-2.5-flash")
+    model = os.environ.get("SAATHI_GEMINI_MODEL", DEFAULT_MODEL)
     if not all(c.isalnum() or c in "-." for c in model):
         raise HTTPException(503, "Invalid Gemini model configuration.")
     payload = {
