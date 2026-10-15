@@ -73,8 +73,8 @@ With the backend and frontend running, open http://127.0.0.1:5173. The app is on
 4. **Choose, review, book**: pick an option, read the review, then press Book with the chosen app. Nothing is booked before that button. The result shows a simulated reference.
 5. **Order food**: the same flow for Uber Eats, Swiggy and Zomato, following the diet, spice and budget saved in Profile.
 6. **Apps**: turn each demo app on or off. Switch Uber off and the next ride comparison leaves it out.
-7. **Activity**: every booking with its app, reference and status; cancel from here.
-8. **Family**: turn on caregiver approvals in Profile, create an invitation, then join from a private window. Requests above your limit, and every medicine request, wait for the caregiver.
+7. **Activity**: upcoming appointments and reminders, then every booking with its app, booking status and, separately, its simulated payment status. Filter by type, status and date; open a booking for its details and timeline.
+8. **Family (Care Circle)**: invite trusted people with a role and explicit permissions, choose what is shared, manage trusted contacts and ask for help. See [Care Circle Dashboard](#care-circle-dashboard).
 9. **Profile**: larger text, high contrast, Hindi voice language and preferences. The **About this demo** link in the footer lists what is real and what is simulated.
 
 ### Install it as an app
@@ -98,6 +98,75 @@ SAATHI_ALLOWED_ORIGINS=http://198.51.100.20:5173 .venv/bin/python -m uvicorn app
 ```
 
 Then open `http://198.51.100.20:5173` on the phone. Without `SAATHI_ALLOWED_ORIGINS` the backend refuses the phone's requests as cross-site. `--host 0.0.0.0` lets anyone on that network reach the demo, which holds no real data, so use a network you trust and stop the server afterwards. Voice input and install are unavailable over plain http.
+
+## Care Circle Dashboard
+
+The older adult stays in control. Trusted people ("caretakers") join a Care Circle by invitation and see only what the older adult chose to share. Every permission is checked by the backend inside the same transaction as the change, so hiding a button is never the only protection, and removing someone takes effect on their very next request. All providers, bookings and payments are simulated: nothing is dispatched, ordered or charged.
+
+### Roles and permissions
+
+| Role | Includes |
+| --- | --- |
+| Viewer | See shared rides, orders and appointments |
+| Assistant | Viewer, plus add and change reminders and appointments, and fix the saved address |
+| Approver | Viewer, plus approve, decline or ask about requests the older adult sends for approval |
+| Administrator | Viewer, plus invite and remove viewers and assistants (never approvers, admins or sensitive permissions) |
+
+The older adult can add, per person: conversation summaries, safety alerts and, marked as sensitive, medicine details, full transcripts, simulated payment status and emergency-contact changes. Sharing can also be switched off per service (rides, food, medicine, appointments) or per booking.
+
+### What each side sees
+
+- **Older adult** (owner): Family tab → Care Circle (people, invitations, access, sharing, approval rule, trusted contacts, alerts, "Ask my Care Circle for help"); Activity → upcoming plans, filters, booking details with a timeline and a sharing switch.
+- **Caretaker**: a separate dashboard with Overview (needs your attention, upcoming, active rides and orders, new updates), Activity, Approvals, Chats (summaries; transcripts only with permission), Safety (suspected and confirmed events kept apart, trusted contacts) and Care Circle & settings (what they can and cannot do). It refreshes every 8 seconds and when the tab is reopened.
+
+Booking status (waiting for approval, booked, completed, failed, cancelled, declined) and simulated payment status (not charged, pay on completion, paid) are separate fields everywhere.
+
+### Seed or reset the demo data
+
+Demo controls are on automatically when `SAATHI_ENVIRONMENT` is `local` or `test`. Anywhere else they are off unless `SAATHI_DEMO_CONTROLS=1` is set, and the API answers 404.
+
+- **Seed**: Profile → Demo controls → **Load Meera's demo** → confirm. This replaces this browser's demo data with Meera: a check-up with Dr Mehta tomorrow at 10:30 (India time), an eye check-up, reminders (one missed, one done), a medicine reorder waiting for approval, a completed meal, a suspected scam message, trusted contacts, and two pending invitations: **Asha** (Approver, plus summaries, alerts, medicine details and reminders) and **Ravi** (Viewer). The two invitation links are shown on screen. API: `POST /api/hub/demo/seed` with an owner session.
+- **Force a failure**: Profile → Demo controls → **Make the next booking fail**.
+- **Mark a booking completed**: open a booked item in Activity → **Demo: mark completed**. This sets the payment to paid (simulated).
+- **Reset**: About → **Reset demo data** clears this browser's demo, including everyone's Care Circle access.
+
+All seeded addresses, phone numbers and medicines are labelled as samples.
+
+### Run the full hackathon demo
+
+Start the backend and frontend (see [Run locally](#run-locally)). Cookies are per site name, so use **http://127.0.0.1:5173** for Meera and open the caretaker links on **http://localhost:5173** or in a private window. Both names reach the same servers.
+
+1. **Meera**: open http://127.0.0.1:5173/#/profile → Load Meera's demo → copy Asha's and Ravi's links.
+2. **Asha**: open Asha's link (with `127.0.0.1` replaced by `localhost`, or in a private window) → Join as caretaker. The Overview shows a medicine request waiting for approval, a suspected scam alert, a missed reminder and tomorrow's check-up.
+3. **Ravi**: open his link in another private window → Join. He sees shared activity only: no medicine names, payments, conversations, alerts or approval buttons.
+4. **Care coordination**: as Meera, type or say "Please take me to my doctor's appointment". Saathi uses the saved appointment for the destination. Choose **Ola Mini (₹165)** → **Book with Ola**. It is above Meera's ₹150 limit, so it shows **Sent for approval**, payment **Not charged (simulated)**.
+5. **Delegated approval**: as Asha, Approvals → see why approval is needed → **Approve**. Within seconds Meera's Activity shows **Booked · simulated** and **Pay on completion (simulated) · nothing charged yet**. The details show "Approved by Asha", the appointment, the timeline, and a summary that separates **Confirmed** from **Suggestions (not done)**.
+6. **Permissions hold on the server**: Ravi's Approvals tab says he has no access. Calling the approval API directly as Ravi returns 403 (the end-to-end script checks this).
+7. **Failure path**: as Meera, Make the next booking fail → book any ride. It shows **Booking failed**, nothing booked or charged, with Try again. Asha gets a confirmed alert in Safety, and Ravi's Activity shows it as failed, not completed.
+8. **Revocation**: as Meera, Family → Ravi → **Remove**. Ravi's next refresh says "Your Care Circle access was removed."
+
+`scripts/e2e-local.cjs` runs these steps in three browser contexts, using Playwright with Edge or Chrome.
+
+### Tests for this feature
+
+- Backend: `backend/tests/test_care_circle.py` (roles, sensitive permissions, sharing, separate payment status, forced failure, one decision per request, revocation, invitations, administrator limits) and `backend/tests/test_care_plans.py` (appointments, reminders, coordination, summaries, transcripts, scam, repeated trouble, help, contacts, address, seed, production demo-control lock).
+- Frontend: `frontend/src/CareCircle.test.tsx` (owner Care Circle screens and the caretaker dashboard).
+- Run them with the normal [Checks](#checks).
+
+### Implemented and not yet implemented
+
+Implemented: shared activity timeline with filters and details; role-based access with explicit sensitive permissions, enforced by the backend; multiple caretakers; per-service and per-booking sharing; appointments and reminders, with missed reminders flagged for follow-up and never treated as proof a medicine was taken; approvals with "ask a question"; the safety centre (failed bookings, suspected scams, emergency mentions, repeated trouble, help requests); conversation summaries with confirmed actions taken only from stored records; optional Gemini-written summaries (owner or summary holders, when a key is set); care coordination from a saved appointment; audit of who did what; seed, reset, forced failure and simulated completion.
+
+Not implemented, or different from the plan:
+
+- **Live updates** use polling (8 seconds and on tab focus), not Firestore listeners. The deployed Firestore rules deny direct client access, and there is no client sign-in to authorise listeners.
+- **Identity**: Firebase sign-in was removed on `develop`. Owners and caretakers are anonymous, signed demo sessions that last up to 24 hours per browser. Invitations are one-use and expire after 24 hours.
+- **Notifications** appear in the app only; no SMS, email or push.
+- **Phone calls and WhatsApp** are not connected. The "message" channel is an in-app preview, and seeded conversations are labelled as samples.
+- **Scam detection** is word matching, labelled as a suspicion; there is no AI classifier.
+- **Multiple caretakers**: there are no primary or backup contacts and no appointment responsibilities. Editing an appointment exists in the API (`PUT /api/hub/appointments/{id}`), but the UI only adds and removes.
+- **Gemini summaries** have not been tried with a real key; tests fake the Gemini responses.
+- **End-to-end script**: `scripts/e2e-local.cjs` has not been run here, because this laptop's managed browsers block automation. The flow was checked by hand in a real browser with two sessions.
 
 ## Checks
 
@@ -149,12 +218,12 @@ This starts the image in the `production` environment on an injected `PORT`, the
 
 ## Layout
 
-- `frontend/`: React app, mobile first. `src/screens/` holds Home, the request flow, Activity, Apps, Family, Profile and About; `src/components/` the bottom navigation, option cards and banners; `src/theme.css` the Google palette (contrast is enforced by `src/theme.test.ts`); `public/` the manifest, icons and service worker.
-- `backend/`: configuration, health/version/readiness API, local-only prototype routes (`app/hub.py`, `app/demo.py`), the simulated provider apps (`app/providers.py`), tests, Dockerfile, pinned dependency snapshots.
+- `frontend/`: React app, mobile first. `src/screens/` holds the older adult's screens (Home, the request flow, Activity and details, Apps, Care Circle, Profile, About, invitation); `src/care/` the caretaker dashboard; `src/components/` shared pieces (bottom navigation, activity list and details, plans, alerts, summaries, demo controls); `src/theme.css` the Google palette (contrast is enforced by `src/theme.test.ts`); `public/` the manifest, icons and service worker.
+- `backend/`: configuration, health/version/readiness API, prototype routes (`app/hub.py`, `app/demo.py`), Care Circle rules and caretaker views (`app/care.py`), the demo seed (`app/seed.py`), request routing (`app/intent.py`), Gemini calls (`app/assistant.py`), the simulated provider apps (`app/providers.py`), tests, Dockerfile, pinned dependency snapshots.
 - `infrastructure/`: deny-all Firestore rules until Phase 2 authentication.
 - `firebase.json`: static Hosting plus `/api/**` forwarding to Cloud Run.
 - `.gitlab-ci.yml`: lint, tests, package builds, container build and run check; no automatic deployment.
-- `scripts/`: `smoke.mjs` (API and browser smoke test), `container-smoke.sh` (container check), `make-icons.sh` (regenerates the app icons on macOS), `firestore-local.ps1` (Windows emulator launcher), `e2e-local.cjs` (prototype end-to-end run on a phone-sized screen).
+- `scripts/`: `smoke.mjs` (API and browser smoke test), `container-smoke.sh` (container check), `make-icons.sh` (regenerates the app icons on macOS), `firestore-local.ps1` (Windows emulator launcher), `e2e-local.cjs` (the scripted Care Circle demo, end to end, on a phone-sized screen).
 - `docs/phase-1.md`: acceptance status, evidence and remaining work.
 - `docs/deployment.md`: proposed deployment steps for a separately approved cloud task.
 - `docs/firestore.md`, `docs/local-demo.md`: Firestore emulator setup and the local prototype.
@@ -165,7 +234,7 @@ This starts the image in the `production` environment on an injected `PORT`, the
 `SAATHI_VERSION`: 0.1.0 by default.
 `PORT`: Cloud Run container port, default 8080 in Docker.
 Firestore variables (`SAATHI_FIRESTORE_MODE`, `SAATHI_FIRESTORE_PROJECT`, `FIRESTORE_EMULATOR_HOST`) are described in `docs/firestore.md`.
-Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`.
+Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`, `SAATHI_DEMO_CONTROLS` (`1` enables seed, forced failure and simulated completion outside `local`/`test`; leave it unset in production).
 
 Do not commit credentials or service-account keys. No credentials are required for local Phase 1. Firebase Hosting and the API share an origin; permissive CORS is unnecessary.
 
