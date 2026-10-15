@@ -1,0 +1,285 @@
+import { act, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import App from './App'
+import type { Activity, CareEvent, Conversation, Grant, HubState, Option, Proposal, Reminder } from './hub'
+import { applyFilters, noFilters } from './filters'
+import { fail, makeCareState, makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
+
+beforeEach(() => window.history.replaceState(null, '', '/'))
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+const now = () => Date.now() / 1000
+function order(option: Option, status = 'simulated_confirmed', extra: Partial<Activity> = {}): Activity {
+  const paid = status === 'simulated_confirmed' ? 'pending_simulated' : status === 'completed' ? 'succeeded_simulated' : 'not_charged_simulated'
+  return {
+    id: `id-${option.id}-${status}`, service: option.provider === 'swiggy' ? 'food' : 'ride', channel: 'app', option, status,
+    created_at: now() - 60, reference: 'SIM-AAAA1111', simulated: true, shared: true,
+    payment: { method: 'pay_on_completion', status: paid, amount: option.price, simulated: true }, questions: [], decision: null, ...extra,
+  } as Activity
+}
+const event = (overrides: Partial<CareEvent>): CareEvent => ({
+  id: 'ev1', at: now() - 30, kind: 'booked', title: 'Booked (simulated)', detail: '', permission: 'view_activity', ref: null,
+  severity: 'info', certainty: 'confirmed', actor: 'saathi', status: 'info', ...overrides,
+})
+const asha: Grant = { id: 'g1', name: 'Asha', relationship: 'Daughter', role: 'approver', permissions: ['approve', 'view_activity', 'view_medication'], status: 'active' }
+const summary = (overrides: Partial<Conversation> = {}): Conversation => ({
+  id: 'conv1', channel: 'voice', at: now() - 120, service: 'ride', request_id: 'id-uber-go-simulated_confirmed', safety: null, status: 'simulated_confirmed',
+  summary: { by: 'rules', text: 'Asked for a ride to Sunrise Clinic.', confirmed: ['Booked Uber Go with Uber (simulated). Nothing charged yet.'], suggestions: ['Ask whether someone could go along to the appointment.'] },
+  ...overrides,
+})
+
+// ---------- Owner ----------
+
+test('booking status and simulated payment status are shown as separate facts', async () => {
+  stubApi({}, makeState({ activity: [order(uberRide), order(swiggyMeal, 'completed'), order(uberRide, 'failed', { failure: 'Simulated provider failure: nothing was booked or charged.' })] }))
+  window.location.hash = '#/activity'
+  render(<App />)
+  expect(await screen.findByText('Booked · simulated')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Pay on completion (simulated) · nothing charged yet')).toBeInTheDocument()
+  expect(screen.getByText('Completed · simulated')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Paid (simulated) · no real money moved')).toBeInTheDocument()
+  expect(screen.getByText('Failed · nothing booked')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Not charged (simulated)')).toBeInTheDocument()
+  expect(screen.queryByText(/Completed/, { selector: '.status.failed' })).not.toBeInTheDocument()
+})
+
+test('activity filters by type, status and date', () => {
+  const items = [order(uberRide), order(swiggyMeal, 'completed'), order(uberRide, 'failed'), { ...order(uberRide, 'cancelled'), created_at: now() - 10 * 86_400 }]
+  expect(applyFilters(items, { ...noFilters, status: 'failed' }).map((i) => i.status)).toEqual(['failed'])
+  expect(applyFilters(items, { ...noFilters, service: 'food' }).map((i) => i.status)).toEqual(['completed'])
+  expect(applyFilters(items, { ...noFilters, range: 'week' })).toHaveLength(3)
+  expect(applyFilters(items, { ...noFilters, status: 'cancelled', range: 'week' })).toHaveLength(0)
+})
+
+test('a failed booking says nothing was booked or charged and offers a way forward', async () => {
+  const proposal: Proposal = { id: 'p1', service: 'ride', channel: 'app', options: [uberRide], clarification: '', summary: 'Ride options', status: 'proposed', expires_at: now() + 900 }
+  stubApi({ 'POST /requests': () => proposal, 'POST /requests/*/confirm': () => order(uberRide, 'failed', { failure: 'x' }) })
+  window.location.hash = '#/request/ride'
+  render(<App />)
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
+  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Choose Uber Go from Uber' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  expect(await screen.findByRole('heading', { name: 'Booking failed' })).toBeInTheDocument()
+  expect(screen.getByText(/Nothing was booked and nothing was charged/)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'All done' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+})
+
+test('a ride for an appointment shows the appointment and only suggests asking someone along', async () => {
+  const appointment = { id: 'appt1', title: 'Check-up with Dr Mehta', with_whom: 'Dr Mehta', place: 'Sunrise Clinic', starts_at: now() + 86_400, notes: '', ride_request_id: null, created_by: 'owner' }
+  const proposal: Proposal = { id: 'p2', service: 'ride', channel: 'voice', options: [uberRide], clarification: '', summary: 'Rides to Sunrise Clinic for Check-up with Dr Mehta', status: 'proposed', expires_at: now() + 900, appointment_id: 'appt1', input: { message: 'Take me to my doctor' } }
+  const state = makeState({ appointments: [appointment], requests: [proposal] })
+  const calls = stubApi({ 'POST /requests/*/confirm': () => order(uberRide, 'simulated_confirmed', { appointment_id: 'appt1' }), 'POST /help': () => event({}) }, state)
+  window.location.hash = '#/request/ride/p2'
+  render(<App />)
+  expect(await screen.findByText(/For your appointment:/)).toHaveTextContent('Check-up with Dr Mehta')
+  await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  expect(await screen.findByText(/Nobody is asked unless you choose to/)).toBeInTheDocument()
+  expect(calls.some((call) => call.url.endsWith('/help'))).toBe(false)
+  await userEvent.click(screen.getByRole('button', { name: 'Ask if someone can come with me' }))
+  expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'accompany', appointment_id: 'appt1' })
+  expect(await screen.findByText('Your Care Circle was asked. Nobody has agreed yet.')).toBeInTheDocument()
+})
+
+test('the owner invites someone with a role plus chosen sensitive permissions and gets a one-use link', async () => {
+  const calls = stubApi({ 'POST /care-circle': () => ({ grant: asha, code: 'abc.def' }) })
+  window.location.hash = '#/family'
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Your Care Circle' })).toBeInTheDocument()
+  const form = screen.getByRole('heading', { name: 'Add someone' }).closest('section') as HTMLElement
+  await userEvent.type(within(form).getByRole('textbox', { name: 'Name' }), 'Asha')
+  await userEvent.click(within(form).getByRole('radio', { name: /Approver/ }))
+  await userEvent.click(within(form).getByRole('checkbox', { name: 'See saved medicine details' }))
+  expect(within(form).getByRole('checkbox', { name: 'Read full conversation transcripts' })).not.toBeChecked()
+  await userEvent.click(within(form).getByRole('button', { name: 'Create invitation' }))
+  expect(calls.find((call) => call.url.endsWith('/care-circle'))?.body).toEqual({ name: 'Asha', relationship: '', role: 'approver', extras: ['view_medication'] })
+  expect(await within(form).findByDisplayValue(/#\/join\/abc\.def$/)).toBeInTheDocument()
+})
+
+test('the owner can change what is shared, remove a person and ask for help', async () => {
+  const calls = stubApi({
+    'PUT /profile': (body) => makeState({ care_circle: [asha], profile: body as HubState['profile'] }),
+    'DELETE /care-circle/*': () => asha,
+    'POST /help': () => event({ kind: 'help_requested' }),
+  }, makeState({ care_circle: [asha] }))
+  window.location.hash = '#/family'
+  render(<App />)
+  const person = (await screen.findByText('Asha', { selector: 'strong' })).closest('li') as HTMLElement
+  expect(within(person).getByText('Approve or decline requests sent for approval')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Rides' }))
+  const saved = calls.find((call) => call.method === 'PUT')?.body as HubState['profile']
+  expect(saved.sharing).toEqual({ ride: false, food: true, medicine: true, appointments: true })
+  await userEvent.click(within(person).getByRole('button', { name: 'Remove' }))
+  expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/care-circle/g1'))).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: 'Ask my Care Circle for help' }))
+  expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'help' })
+})
+
+test('activity details show the timeline, sharing switch and demo completion', async () => {
+  const booked = order(uberRide)
+  const calls = stubApi({ 'PUT /activity/*/sharing': () => ({ ...booked, shared: false }), 'POST /activity/*/complete': () => order(uberRide, 'completed') },
+    makeState({ demo_controls: true, activity: [booked], events: [event({ ref: booked.id, title: 'Booked (simulated): Uber Go with Uber' })], conversations: [summary({ request_id: booked.id })] }))
+  window.location.hash = `#/activity/${booked.id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Uber Go' })).toBeInTheDocument()
+  expect(screen.getByText('Booked (simulated): Uber Go with Uber')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Confirmed' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Suggestions (not done)' })).toBeInTheDocument()
+  expect(screen.getByText('Automatic summary (not AI)')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Share this with my Care Circle' }))
+  expect(calls.find((call) => call.url.endsWith('/sharing'))?.body).toEqual({ shared: false })
+  await userEvent.click(screen.getByRole('button', { name: 'Demo: mark completed' }))
+  expect(calls.some((call) => call.url.endsWith('/complete'))).toBe(true)
+})
+
+test('upcoming plans flag missed reminders without claiming a medicine was taken', async () => {
+  const reminders: Reminder[] = [
+    { id: 'r1', title: 'Reorder BP tablet', kind: 'medicine', due_at: now() - 3600, notes: '', done_at: null, status: 'missed', created_by: 'owner' },
+  ]
+  const calls = stubApi({ 'POST /reminders/*/done': () => ({ ...reminders[0], status: 'done' }) }, makeState({ reminders }))
+  window.location.hash = '#/activity'
+  render(<App />)
+  expect(await screen.findByText('Missed · follow up')).toBeInTheDocument()
+  expect(screen.getByText('A reminder is not proof that a medicine was taken.')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: "I've done this" }))
+  expect(calls.some((call) => call.url.endsWith('/reminders/r1/done'))).toBe(true)
+})
+
+test('demo controls load Meera with caretaker links and arm a failure, only when enabled', async () => {
+  const seeded = makeState({ profile: { ...makeState().profile, name: 'Meera' }, demo_controls: true })
+  const calls = stubApi({ 'POST /demo/seed': () => ({ state: seeded, invites: [{ name: 'Asha', role: 'approver', code: 'c1.s' }, { name: 'Ravi', role: 'viewer', code: 'c2.s' }] }), 'POST /demo/fail-next': () => ({ fail_next: true }) }, makeState({ demo_controls: true }))
+  window.location.hash = '#/profile'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: /Load Meera's demo/ }))
+  expect(calls.some((call) => call.url.endsWith('/demo/seed'))).toBe(false)
+  await userEvent.click(screen.getByRole('button', { name: 'Yes, replace my demo data' }))
+  expect(await screen.findByDisplayValue(/#\/join\/c1\.s$/)).toBeInTheDocument()
+  expect(screen.getByDisplayValue(/#\/join\/c2\.s$/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Make the next booking fail' }))
+  expect(calls.some((call) => call.url.endsWith('/demo/fail-next'))).toBe(true)
+})
+
+test('without demo controls the profile has no seed or failure buttons', async () => {
+  stubApi()
+  window.location.hash = '#/profile'
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Your profile' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Load Meera's demo/ })).not.toBeInTheDocument()
+})
+
+// ---------- Caretaker ----------
+
+test('an invitation link joins this browser as a caretaker', async () => {
+  const calls = stubApi({ 'POST /caregiver/join': () => makeCareState(['view_activity']) })
+  window.location.hash = '#/join/abc.def'
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Join a Care Circle' })).toBeInTheDocument()
+  expect(screen.getByText(/open this link in a private window/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Join as caretaker' }))
+  expect(calls.find((call) => call.url.endsWith('/caregiver/join'))?.body).toEqual({ code: 'abc.def' })
+  expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
+})
+
+test('the overview answers what needs action, what is coming and what changed', async () => {
+  const waiting = order(swiggyMeal, 'awaiting_approval')
+  stubApi({}, makeCareState(['view_activity', 'approve', 'receive_alerts'], {
+    approvals: [waiting], activity: [waiting, order(uberRide)],
+    appointments: [{ id: 'a1', title: 'Check-up with Dr Mehta', with_whom: '', place: 'Sunrise Clinic', starts_at: now() + 86_400, notes: '', ride_request_id: 'x', created_by: 'owner' }],
+    reminders: [{ id: 'r1', title: 'Call the clinic', kind: 'appointment', due_at: now() - 60, notes: '', done_at: null, status: 'missed', created_by: 'owner' }],
+    events: [event({ kind: 'suspected_scam', title: 'Possible scam message', permission: 'receive_alerts', severity: 'attention', certainty: 'suspected', status: 'open' })],
+  }))
+  render(<App />)
+  const attention = (await screen.findByRole('heading', { name: 'Needs your attention' })).closest('section') as HTMLElement
+  expect(within(attention).getByRole('link', { name: '1 request waiting for your approval' })).toHaveAttribute('href', '#/approvals')
+  expect(within(attention).getByRole('link', { name: '1 alert to review' })).toHaveAttribute('href', '#/safety')
+  expect(within(attention).getByText(/Missed reminder: Call the clinic/)).toHaveTextContent('does not mean anything was or was not done')
+  expect(screen.getByText(/Check-up with Dr Mehta/)).toBeInTheDocument()
+  expect(screen.getByText('Possible scam message (suspected, not confirmed)')).toBeInTheDocument()
+})
+
+test('an approver approves, asks first, and sees a clear message if someone else already decided', async () => {
+  const waiting = order(swiggyMeal, 'awaiting_approval', { approval_reason: 'Above the ₹100 approval limit.' })
+  let decisions = 0
+  const calls = stubApi({ 'POST /activity/*/decision': () => (++decisions === 3 ? fail(409, { detail: 'Already approved by Ravi.' }) : { ...waiting }) },
+    makeCareState(['view_activity', 'approve'], { approvals: [waiting], activity: [waiting] }))
+  window.location.hash = '#/approvals'
+  render(<App />)
+  expect(await screen.findByText('Why: Above the ₹100 approval limit.')).toBeInTheDocument()
+  await userEvent.type(screen.getByRole('textbox', { name: 'Ask a question first' }), 'Is this lunch?')
+  await userEvent.click(screen.getByRole('button', { name: 'Send question' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+  expect(calls.filter((call) => call.url.endsWith('/decision')).map((call) => call.body)).toEqual([{ action: 'ask', note: 'Is this lunch?' }, { action: 'approve', note: '' }])
+  await userEvent.click(screen.getByRole('button', { name: 'Decline' }))
+  expect(await screen.findByText('Already approved by Ravi.')).toBeInTheDocument()
+})
+
+test('a caretaker without a permission sees why, not an empty page', async () => {
+  stubApi({}, makeCareState(['view_activity']))
+  window.location.hash = '#/approvals'
+  render(<App />)
+  expect(await screen.findByText(/Meera has not given you access to approving requests/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  window.location.hash = '#/conversations'
+  expect(await screen.findByText(/access to conversation summaries/)).toBeInTheDocument()
+})
+
+test('summaries show confirmed actions apart from suggestions; transcripts only with permission', async () => {
+  stubApi({ 'GET /conversations/*/transcript': () => ({ id: 'conv1', transcript: [{ role: 'user', text: 'Take me to my doctor' }, { role: 'assistant', text: 'Rides to Sunrise Clinic' }] }) },
+    makeCareState(['view_activity', 'view_summaries'], { conversations: [summary()] }))
+  window.location.hash = '#/conversations'
+  const { unmount } = render(<App />)
+  expect(await screen.findByText('Booked Uber Go with Uber (simulated). Nothing charged yet.')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Suggestions (not done)' })).toBeInTheDocument()
+  expect(screen.getByText(/Full transcripts are not shared with you/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Show transcript' })).not.toBeInTheDocument()
+  unmount()
+
+  stubApi({ 'GET /conversations/*/transcript': () => ({ id: 'conv1', transcript: [{ role: 'user', text: 'Take me to my doctor' }] }) },
+    makeCareState(['view_activity', 'view_summaries', 'view_transcripts'], { conversations: [summary()] }))
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Show transcript' }))
+  expect(await screen.findByText('Take me to my doctor')).toBeInTheDocument()
+})
+
+test('safety separates suspicions from confirmed events and lets alert holders resolve them', async () => {
+  const calls = stubApi({ 'POST /events/*/resolve': () => ({}) }, makeCareState(['view_activity', 'receive_alerts'], {
+    events: [
+      event({ id: 'e1', kind: 'suspected_scam', title: 'Possible scam message', permission: 'receive_alerts', severity: 'attention', certainty: 'suspected', status: 'open' }),
+      event({ id: 'e2', kind: 'booking_failed', title: 'Booking failed: Uber Go', permission: 'receive_alerts', severity: 'attention', status: 'open' }),
+    ],
+  }))
+  window.location.hash = '#/safety'
+  render(<App />)
+  expect(await screen.findByText('Suspected · not confirmed')).toBeInTheDocument()
+  expect(screen.getByText('Confirmed event')).toBeInTheDocument()
+  await userEvent.click(screen.getAllByRole('button', { name: 'Mark as handled' })[0])
+  expect(calls.some((call) => call.url.endsWith('/events/e1/resolve'))).toBe(true)
+})
+
+test('settings list what the caretaker can and cannot do, and leaving ends the caretaker view', async () => {
+  const calls = stubApi({}, makeCareState(['view_activity']))
+  window.location.hash = '#/circle'
+  render(<App />)
+  expect(await screen.findByText(/See shared rides, orders and appointments/)).toHaveTextContent('allowed')
+  expect(screen.getByText(/Read full conversation transcripts/)).toHaveTextContent('not allowed')
+  await userEvent.click(screen.getByRole('button', { name: 'Leave the caretaker view on this browser' }))
+  expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/session'))).toBe(true)
+})
+
+test('updates arrive without refreshing, and a revoked caretaker is told access was removed', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  let state = 0
+  stubApi({ 'GET /state': () => (++state === 1 ? makeCareState(['view_activity', 'approve'], { approvals: [order(swiggyMeal, 'awaiting_approval')] }) : fail(403, { detail: 'Your Care Circle access was removed.' })) },
+    makeCareState(['view_activity', 'approve']))
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /request waiting/ })).not.toBeInTheDocument()
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000) })
+  expect(await screen.findByRole('link', { name: '1 request waiting for your approval' })).toBeInTheDocument()
+  await act(async () => { await vi.advanceTimersByTimeAsync(8000) })
+  expect(await screen.findByText('Your Care Circle access was removed.')).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Supporting Meera' })).not.toBeInTheDocument()
+})

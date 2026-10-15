@@ -115,6 +115,10 @@ def test_delegated_approval_updates_the_owners_task_once(app, owner):
     assert mine["status"] == "simulated_confirmed"
     assert mine["payment"]["status"] == "pending_simulated"
     assert mine["decision"]["name"] == "Asha"
+    alert = [
+        e for e in owner.get("/api/hub/state").json()["events"] if e["kind"] == "approval_needed"
+    ][0]
+    assert (alert["status"], alert["resolved_by"]) == ("resolved", "Asha")
     audit = owner.get("/api/hub/state").json()["audit"]
     assert [a["actor"] for a in audit if a["event"] == "caregiver_approve"] == ["Asha"]
 
@@ -272,3 +276,12 @@ def test_reset_removes_everyone(app, owner):
     asha = join(app, owner, "Asha", "approver")
     owner.delete("/api/hub/data")
     assert asha.get("/api/hub/state").status_code == 403
+
+
+def test_an_expired_or_broken_cookie_starts_a_fresh_demo(app, owner):
+    with TestClient(app) as visitor:
+        visitor.cookies.set("__session", "not-a-real-session", path="/api/hub")
+        assert visitor.get("/api/hub/state").status_code == 401
+        fresh = visitor.post("/api/hub/session")
+        assert fresh.status_code == 200 and fresh.json()["role"] == "owner"
+        assert visitor.get("/api/hub/state").status_code == 200

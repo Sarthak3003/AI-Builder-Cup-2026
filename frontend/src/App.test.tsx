@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import type { Activity, Option, Profile, Proposal, Service } from './hub'
-import { makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
+import { makeCareState, makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
 
 // jsdom cannot decode audio; the real conversion is covered in lib.test.ts.
 vi.mock('./wav', async (original) => ({ ...(await original<typeof import('./wav')>()), toWav: async () => new TextEncoder().encode('RIFF').buffer }))
@@ -276,7 +276,7 @@ test('a booking that needs caregiver approval says so instead of claiming it is 
   await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
   await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
   await userEvent.click(await screen.findByRole('button', { name: 'Choose Uber Go from Uber' }))
-  expect(screen.getByText('Your caregiver must approve this request first.')).toBeInTheDocument()
+  expect(screen.getByText('Someone in your Care Circle must approve this first.')).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
   expect(await screen.findByRole('heading', { name: 'Sent for approval' })).toBeInTheDocument()
   expect(screen.queryByText(/Saathi booked/)).not.toBeInTheDocument()
@@ -309,27 +309,15 @@ test('turning an app off saves the choice, and the page is honest that these are
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Use Uber' })).not.toBeChecked())
 })
 
-test('a caregiver cannot make requests and can approve from the Family tab', async () => {
-  const waiting = orderOf(swiggyMeal, 'food', 'awaiting_approval')
-  const calls = stubApi({ 'POST /activity/*/decision': () => ({ ...waiting, status: 'simulated_confirmed' }) }, makeState({ role: 'caregiver', activity: [waiting] }))
+test('a caretaker gets the Care Circle dashboard, never the request screens', async () => {
+  stubApi({}, makeCareState(['view_activity', 'approve']))
   window.location.hash = '#/request/ride'
   render(<App />)
-  const review = await screen.findByRole('link', { name: 'Review approvals' })
+  expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
   expect(screen.queryByRole('textbox', { name: 'Where to?' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Show options' })).not.toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'Family, 1 waiting for approval' })).toBeInTheDocument()
-  await userEvent.click(review)
-  expect(await screen.findByRole('heading', { name: 'Caregiver approvals' })).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
-  expect(calls.some((call) => call.url.endsWith('/decision') && (call.body as { action: string }).action === 'approve')).toBe(true)
-})
-
-test('caregivers see the apps but cannot change them', async () => {
-  stubApi({}, makeState({ role: 'caregiver' }))
-  window.location.hash = '#/apps'
-  render(<App />)
-  expect(await screen.findByRole('switch', { name: 'Use Uber' })).toBeDisabled()
-  expect(screen.getByText('Only the account owner can change these.')).toBeInTheDocument()
+  const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Overview', 'Activity', 'Approvals', 'Chats', 'Safety'])
 })
 
 test('connection failures stay visible and can be retried', async () => {
@@ -457,7 +445,7 @@ test('simplified Activity shows only what was booked, its status and Cancel', as
   window.location.hash = '#/activity'
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Uber Go' })).toBeInTheDocument()
-  expect(screen.getByText('Booked · demo only')).toBeInTheDocument()
+  expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Cancel request' })).toBeInTheDocument()
   for (const gone of [/Activity audit/, /SIM-11111111/, /Sample fare/, /Refresh activity/, /whichever way you ask/]) {
     expect(screen.queryByText(gone)).not.toBeInTheDocument()

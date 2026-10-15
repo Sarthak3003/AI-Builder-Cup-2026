@@ -4,20 +4,21 @@ import type { Service } from './hub'
 export type Route =
   | { page: 'home' }
   | { page: 'request'; service: Service; proposal?: string }
-  | { page: 'activity' }
-  | { page: 'apps' }
-  | { page: 'family' }
-  | { page: 'profile' }
-  | { page: 'about' }
+  | { page: 'detail'; id: string }
+  | { page: 'join'; code: string }
+  | { page: PlainPage }
 
 export const services: Service[] = ['ride', 'food', 'medicine']
-export type TabPage = 'home' | 'activity' | 'apps' | 'family' | 'profile'
+export type TabPage = 'home' | 'activity' | 'apps' | 'family' | 'profile' | 'approvals' | 'conversations' | 'safety'
 export const tabHref = (page: TabPage) => (page === 'home' ? '#/' : `#/${page}`)
-const plainPages = ['activity', 'apps', 'family', 'profile', 'about'] as const
+const plainPages = ['activity', 'apps', 'family', 'profile', 'about', 'approvals', 'conversations', 'safety', 'circle'] as const
+type PlainPage = (typeof plainPages)[number]
 
 export function parseRoute(hash: string): Route {
   const [page, argument, proposal] = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
   if (page === 'request' && services.includes(argument as Service)) return proposal ? { page, service: argument as Service, proposal } : { page, service: argument as Service }
+  if (page === 'activity' && argument) return { page: 'detail', id: argument }
+  if (page === 'join' && argument) return { page: 'join', code: argument }
   const plain = plainPages.find((name) => name === page)
   return plain ? { page: plain } : { page: 'home' }
 }
@@ -25,6 +26,8 @@ export function parseRoute(hash: string): Route {
 export function routeHref(route: Route): string {
   if (route.page === 'home') return '#/'
   if (route.page === 'request') return `#/request/${route.service}${route.proposal ? `/${route.proposal}` : ''}`
+  if (route.page === 'detail') return `#/activity/${route.id}`
+  if (route.page === 'join') return `#/join/${route.code}`
   return `#/${route.page}`
 }
 

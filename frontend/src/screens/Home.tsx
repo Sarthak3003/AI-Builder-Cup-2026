@@ -16,19 +16,6 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
   const [now] = useState(() => Date.now())
   const words = wordsFor(state.profile.language)
 
-  if (state.role === 'caregiver') {
-    return (
-      <>
-        <h1 className="page-title">Caregiver view</h1>
-        <section className="card">
-          <h2>Help with a decision</h2>
-          <p>You can review shared activity and approve pending requests. Only the account owner can change preferences or make requests.</p>
-          <a className="primary wide" href="#/family">Review approvals</a>
-        </section>
-      </>
-    )
-  }
-
   const appsLine = (service: Service) => {
     if (service === 'medicine') return 'From your saved medicine list'
     const names = state.catalogue.filter((app) => app.service === service && state.profile.enabled_providers.includes(app.id)).map((app) => app.name)

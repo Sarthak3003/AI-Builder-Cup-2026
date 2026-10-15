@@ -131,6 +131,24 @@ def test_doctor_request_uses_the_saved_appointment_and_caretaker_sees_the_ride(a
     assert state(owner)["appointments"][0]["ride_request_id"] is None
 
 
+def test_an_appointment_ride_is_only_called_arranged_once_approved(app, owner):
+    appointment(owner)
+    profile = state(owner)["profile"]
+    profile.update(caregiver_enabled=True, approval_limit=100)
+    owner.put("/api/hub/profile", json=profile)
+    asha = join(app, owner, "Asha", "approver")
+    proposal = ask(owner, "Take me to the doctor")
+    owner.post(
+        f"/api/hub/requests/{proposal['id']}/confirm",
+        json={"option_id": "uber-go", "confirmed": True},
+    )
+    titles = [e["title"] for e in state(owner)["events"] if e["kind"] == "appointment_ride"]
+    assert titles == ["Ride for Check-up with Dr Mehta is waiting for approval"]
+    asha.post(f"/api/hub/activity/{proposal['id']}/decision", json={"action": "approve"})
+    titles = [e["title"] for e in state(owner)["events"] if e["kind"] == "appointment_ride"]
+    assert titles[0] == "Ride arranged for Check-up with Dr Mehta"
+
+
 def test_summaries_separate_confirmed_actions_from_suggestions(app, owner):
     appointment(owner)
     proposal = ask(owner, "Take me to the doctor")
@@ -251,6 +269,18 @@ def test_help_requests_reach_alert_holders_who_can_resolve_them(app, owner):
     assert (resolved["status"], resolved["resolved_by"]) == ("resolved", "Asha")
     assert owner.post("/api/hub/help", json={"kind": "accompany"}).status_code == 404
     assert alerts.post("/api/hub/help", json={}).status_code == 403
+
+
+def test_assistants_may_fix_the_home_address_but_nothing_else(app, owner):
+    viewer = join(app, owner, "Ravi")
+    helper = join(app, owner, "Asha", "assistant")
+    body = {"home": "14 Sample Lane (sample address)"}
+    assert viewer.put("/api/hub/profile/home", json=body).status_code == 403
+    assert helper.put("/api/hub/profile/home", json=body).json()["profile"]["home"] == body["home"]
+    assert state(owner)["profile"]["home"] == body["home"]
+    assert helper.put("/api/hub/profile/home", json={**body, "name": "X"}).status_code == 422
+    profile = state(owner)["profile"]
+    assert helper.put("/api/hub/profile", json=profile).status_code == 403
 
 
 def test_trusted_contacts_need_their_own_permission(app, owner):

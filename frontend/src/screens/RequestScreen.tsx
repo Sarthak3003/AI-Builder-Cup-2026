@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, serviceNames, waitText } from '../hub'
+import { api, formatWhen, paymentLabel, serviceNames, waitText } from '../hub'
 import type { Activity, Option, Proposal, Service } from '../hub'
 import { newId } from '../id'
 import { BackIcon, CheckIcon } from '../icons'
@@ -75,6 +75,8 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
   }
 
   const needsApproval = selection && proposal ? profile.caregiver_enabled && (selection.price > profile.approval_limit || proposal.service === 'medicine') : false
+  const appointment = proposal?.appointment_id ? state.appointments?.find((a) => a.id === proposal.appointment_id) : undefined
+  const receiptAppointment = receipt?.appointment_id ? state.appointments?.find((a) => a.id === receipt.appointment_id) : undefined
   const noteLabel = engine === 'gemini' ? 'Tell Saathi what you need' : channel === 'message' ? 'Your message (local preview, no message is sent)' : 'Anything else we should know? (optional)'
 
   return (
@@ -152,6 +154,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
             {simple ? null : <button className="secondary small" onClick={() => readAloud(proposal.clarification || proposal.summary)}>Read aloud</button>}
           </div>
           {proposal.input?.message ? <p className="heard">You asked: “{proposal.input.message}”</p> : null}
+          {appointment ? <p className="inline-note appointment-note">For your appointment: <strong>{appointment.title}</strong>, {formatWhen(appointment.starts_at)}, at {appointment.place}.</p> : null}
           {proposal.clarification ? (
             <p className="clarify">{proposal.clarification} {proposal.clarification.startsWith('Turn on') ? <a href="#/apps">Open Apps</a> : null}</p>
           ) : simple ? null : (
@@ -181,20 +184,30 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               This is a simulated booking: no real {nouns[proposal.service]} is placed and nothing is charged.
             </p>
           )}
-          {needsApproval ? <p className="inline-note">Your caregiver must approve this request first.</p> : null}
+          {needsApproval ? <p className="inline-note">Someone in your Care Circle must approve this first.</p> : null}
           <button className="primary wide" disabled={busy} onClick={confirm}>{selection.provider_name ? `Book with ${selection.provider_name}` : 'Confirm request'}</button>
           <button className="secondary wide" disabled={busy} onClick={() => setSelection(null)}>Go back</button>
         </section>
       ) : null}
 
-      {step === 'done' && receipt ? (
+      {step === 'done' && receipt && receipt.status === 'failed' ? (
+        <section className="receipt card failed" aria-labelledby="receipt-title">
+          <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">Booking failed</h2>
+          <p className="lead">{receipt.option.provider_name ?? 'The app'} could not take this booking. Nothing was booked and nothing was charged.</p>
+          <p className="muted">This is a simulated failure, so the demo can show what happens when a service fails.</p>
+          <button className="primary wide" onClick={startAgain}>Try again</button>
+          <button className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'help', note: `A booking failed: ${receipt.option.name}` }); hub.notify('Your Care Circle was told.') })}>Ask my Care Circle for help</button>
+        </section>
+      ) : null}
+
+      {step === 'done' && receipt && receipt.status !== 'failed' ? (
         <section className="receipt card" aria-labelledby="receipt-title">
           <span className="receipt-check"><CheckIcon /></span>
           <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">{receipt.status === 'awaiting_approval' ? 'Sent for approval' : simple ? 'Booked' : 'All done'}</h2>
           {simple ? null : (
             <p className="lead">
               {receipt.status === 'awaiting_approval'
-                ? 'Your caregiver will be asked to approve this before Saathi books it.'
+                ? 'Someone in your Care Circle will be asked to approve this before Saathi books it.'
                 : `Saathi booked ${receipt.option.name}${receipt.option.provider_name ? ` with ${receipt.option.provider_name}` : ''} for you.`}
             </p>
           )}
@@ -202,8 +215,15 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
             {receipt.option.provider_name ? <div><dt>App</dt><dd>{receipt.option.provider_name} (demo)</dd></div> : null}
             <div><dt>Price</dt><dd>₹{receipt.option.price}</dd></div>
             {receipt.option.eta_min ? <div><dt>Time</dt><dd>{waitText(receipt.service, receipt.option.eta_min)}</dd></div> : null}
+            {receipt.payment ? <div><dt>Payment</dt><dd>{paymentLabel[receipt.payment.status]}</dd></div> : null}
             {receipt.reference && !simple ? <div><dt>Reference</dt><dd>{receipt.reference}</dd></div> : null}
           </dl>
+          {receiptAppointment && receipt.status === 'simulated_confirmed' && !simple ? (
+            <div className="suggestion">
+              <p><strong>Suggestion:</strong> would you like to ask someone in your Care Circle whether they can come to {receiptAppointment.title} with you? Nobody is asked unless you choose to.</p>
+              <button className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'accompany', appointment_id: receiptAppointment.id }); hub.notify('Your Care Circle was asked. Nobody has agreed yet.') })}>Ask if someone can come with me</button>
+            </div>
+          ) : null}
           {simple ? (
             <>
               <p className="muted">Demo only. Nothing was really booked or paid.</p>

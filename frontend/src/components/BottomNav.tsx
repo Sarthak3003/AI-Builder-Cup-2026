@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { tabHref } from '../route'
 import type { Route, TabPage } from '../route'
 
-export type Tab = { page: TabPage; label: string; icon: ReactNode; badge?: number }
+export type Tab = { page: TabPage; label: string; icon: ReactNode; badge?: number; badgeLabel?: string }
 
 export default function BottomNav({ route, tabs }: { route: Route; tabs: Tab[] }) {
   return (
@@ -16,7 +16,7 @@ export default function BottomNav({ route, tabs }: { route: Route; tabs: Tab[] }
             {tab.badge ? (
               <>
                 <span className="badge" aria-hidden="true">{tab.badge}</span>
-                <span className="sr-only">, {tab.badge} waiting for approval</span>
+                <span className="sr-only">, {tab.badge} {tab.badgeLabel ?? 'waiting for approval'}</span>
               </>
             ) : null}
           </a>

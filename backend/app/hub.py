@@ -150,6 +150,11 @@ class ResolveIn(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class HomeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    home: str = Field(min_length=1, max_length=150)
+
+
 class AssistantRequest(BaseModel):
     id: UUID
     message: str = Field(min_length=3, max_length=1000)
@@ -357,9 +362,14 @@ def hub_router(config: Settings):
 
     @router.post("/session")
     def start(response: Response, saathi_hub: str | None = Cookie(default=None, alias="__session")):
+        who = None
         if saathi_hub:
-            who = identity(saathi_hub)
-        else:
+            try:
+                who = identity(saathi_hub)
+            except HTTPException:
+                # An expired or unreadable anonymous demo cannot be resumed; start a fresh one.
+                who = None
+        if who is None:
             who = {"owner": uuid4().hex, "role": "owner", "expires": time.time() + 86400}
         result = mutate(who, lambda state: public(state, who))
         cookie(response, who)
@@ -385,6 +395,26 @@ def hub_router(config: Settings):
             return public(state, who)
 
         return mutate(who, save, owner_only=True)
+
+    @router.put("/profile/home")
+    def change_home(body: HomeIn, who=actor):
+        """Assistants may fix the pickup address; every other setting stays with the owner."""
+
+        def save(state):
+            need(who, "edit_profile")
+            state["profile"]["home"] = body.home
+            add_event(
+                state,
+                "address_changed",
+                "Home address updated",
+                f"Changed by {actor_name(who)}.",
+                permission="edit_profile",
+                actor=actor_name(who),
+            )
+            record(state, "address_changed", "", actor_name(who))
+            return public(state, who)
+
+        return mutate(who, save)
 
     @router.post("/requests")
     def create(body: ServiceRequest, who=actor):
@@ -766,10 +796,13 @@ def hub_router(config: Settings):
             )
             if linked and not failed:
                 linked["ride_request_id"] = rid
+                waiting = status == "awaiting_approval"
                 add_event(
                     state,
                     "appointment_ride",
-                    f"Ride arranged for {linked['title']}",
+                    f"Ride for {linked['title']} is waiting for approval"
+                    if waiting
+                    else f"Ride arranged for {linked['title']}",
                     f"{label} to {linked['place']}. Simulated: no real driver will come.",
                     ref=rid,
                     topic="appointments",
@@ -790,6 +823,15 @@ def hub_router(config: Settings):
             if proposal["id"] == rid:
                 proposal["status"] = status
 
+    def close_approval_alerts(state, rid, by):
+        for event in state["events"]:
+            if (
+                event["ref"] == rid
+                and event["kind"] == "approval_needed"
+                and event["status"] == "open"
+            ):
+                event.update(status="resolved", resolved_by=by, resolved_at=time.time())
+
     def cancel_order(state, rid):
         order = find_order(state, rid)
         if order["status"] == "cancelled":
@@ -799,6 +841,7 @@ def hub_router(config: Settings):
         order["status"] = "cancelled"
         order["payment"]["status"] = NOT_CHARGED
         sync_proposal(state, rid, "cancelled")
+        close_approval_alerts(state, rid, "owner")
         linked = next(
             (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
         )
@@ -858,6 +901,7 @@ def hub_router(config: Settings):
             "at": time.time(),
         }
         sync_proposal(state, rid, order["status"])
+        close_approval_alerts(state, rid, grant["name"])
         add_event(
             state,
             "approved" if approved else "declined",
@@ -866,6 +910,23 @@ def hub_router(config: Settings):
             ref=rid,
             actor=grant["name"],
         )
+        linked = next(
+            (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
+        )
+        if linked:
+            if not approved:
+                linked["ride_request_id"] = None
+            add_event(
+                state,
+                "appointment_ride",
+                f"Ride arranged for {linked['title']}"
+                if approved
+                else f"Ride for {linked['title']} was declined",
+                "Simulated: no real driver will come." if approved else "No ride is booked.",
+                ref=rid,
+                topic="appointments",
+                severity="info" if approved else "attention",
+            )
         record(state, f"caregiver_{body.action}", rid, grant["name"])
         return order
 

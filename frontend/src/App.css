@@ -272,6 +272,48 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .simple .option h3 { font-size: 1.25em; }
 .simple .footnote { padding-top: 12px; }
 
+/* ---------- Care Circle ---------- */
+.status-chips { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.status-chips .status, .status-chips .pay { display: inline-flex; padding: 3px 10px; border-radius: 999px; font-size: 0.8125em; font-weight: 600; background: var(--surface-2); color: var(--text-2); }
+.status.simulated_confirmed, .status.completed { background: var(--green-tint); color: var(--green-strong); }
+.status.awaiting_approval { background: var(--yellow-tint); color: var(--yellow-ink); }
+.status.failed, .status.rejected { background: var(--red-tint); color: var(--red-strong); }
+.pay.pending_simulated, .pay.succeeded_simulated { background: var(--blue-tint); color: var(--blue-ink); }
+.activity.failed { border-color: var(--red-strong); }
+.activity-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border: 0; padding: 0; margin: 0; }
+.filters .field select { min-height: 48px; padding: 8px 10px; }
+.plan-list, .member-list, .alert-list { display: flex; flex-direction: column; gap: 10px; }
+.plan { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); }
+.plan.missed { border-color: var(--yellow-ink); background: var(--yellow-tint); color: var(--yellow-ink); }
+.chip.missed, .chip.suspected, .chip.invited { background: var(--yellow-tint); color: var(--yellow-ink); }
+.chip.confirmed, .chip.active, .chip.done { background: var(--green-tint); color: var(--green-strong); }
+.member-head, .alert-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.perm-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.perm-list li { padding: 2px 10px; border-radius: 999px; background: var(--blue-tint); color: var(--blue-ink); font-size: 0.8125em; }
+.perm-check { display: flex; flex-direction: column; gap: 6px; }
+.perm-check .yes { color: var(--green-strong); }
+.perm-check .no { color: var(--text-2); }
+.alert { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.alert.suspected { border-style: dashed; border-color: var(--yellow-ink); }
+.alert.confirmed { border-left: 4px solid var(--red-strong); }
+.choice-group { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; }
+.choice-group legend { font-weight: 700; padding: 0 6px; }
+.choice-group.sensitive { border-color: var(--yellow-ink); background: var(--yellow-tint); color: var(--yellow-ink); }
+.check-row { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+.check-row input { width: 24px; height: 24px; flex: none; accent-color: var(--blue-strong); }
+.invite-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius); background: var(--blue-tint); color: var(--blue-ink); }
+.inline-form { display: flex; flex-direction: column; gap: 10px; }
+.link-button { margin-left: 8px; padding: 4px 8px; min-height: 44px; border: 0; background: none; color: var(--blue-strong); font-weight: 600; text-decoration: underline; cursor: pointer; }
+.suggestion { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius); border: 1px dashed var(--blue-ink); background: var(--blue-tint); color: var(--blue-ink); text-align: left; width: 100%; }
+.summary-block h3 { font-size: 0.9375em; margin-bottom: 4px; }
+.summary-block ul { padding-left: 20px; list-style: disc; }
+.summary-block.confirmed h3 { color: var(--green-strong); }
+.summary-block.suggested { color: var(--text-2); }
+.timeline { display: flex; flex-direction: column; gap: 10px; padding-left: 20px; list-style: decimal; }
+.transcript { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius); background: var(--surface-2); }
+.overview.attention { border: 2px solid var(--blue-tint); }
+
 /* ---------- Footer and bottom navigation ---------- */
 .footnote {
   display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
