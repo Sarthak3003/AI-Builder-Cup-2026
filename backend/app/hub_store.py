@@ -10,11 +10,14 @@ from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
 from app.config import Settings
+from app.onboarding import PROFILE_DEFAULTS, new_setup
 
 
 def initial_state():
     return {
+        **new_setup(),
         "profile": {
+            **PROFILE_DEFAULTS,
             "name": "Friend",
             "language": "en-IN",
             "large_text": False,

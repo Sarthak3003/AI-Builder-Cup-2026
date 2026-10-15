@@ -41,6 +41,7 @@ from app.care import (
     visible_events,
 )
 from app.config import Settings
+from app.domain import PaymentMethod
 from app.hub_store import HubStore, initial_state
 from app.intent import (
     EMERGENCY,
@@ -90,6 +91,10 @@ class Profile(BaseModel):
         default_factory=lambda: list(PROVIDER_IDS), max_length=len(PROVIDER_IDS)
     )
     sharing: Sharing = Field(default_factory=Sharing)
+    channel: Literal["app", "voice", "message"] = "app"
+    read_aloud: bool = False
+    offer_help: bool = True
+    payment_method: PaymentMethod | None = None
 
     @field_validator("enabled_providers")
     @classmethod

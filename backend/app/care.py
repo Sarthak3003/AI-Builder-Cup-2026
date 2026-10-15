@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from app.onboarding import ensure_setup
+
 PERMISSIONS = {
     "view_activity": "See shared rides, orders and appointments",
     "manage_reminders": "Add and change reminders and appointments",
@@ -52,6 +54,7 @@ PAID = "succeeded_simulated"
 
 def ensure(state):
     """Fill in Care Circle fields for accounts created before they existed."""
+    ensure_setup(state)
     state.setdefault("care_circle", [])
     state.setdefault("events", [])
     state.setdefault("appointments", [])

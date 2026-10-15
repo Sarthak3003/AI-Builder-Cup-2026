@@ -10,9 +10,44 @@ from datetime import time as clock
 from uuid import uuid4
 
 from app.care import NOT_CHARGED, PAID, add_event, new_grant, payment
+from app.domain import ONBOARDING_STEPS, SERVICE_TYPES
+from app.onboarding import PlaceIn, connect, save_place
 from app.providers import PROVIDER_IDS, food_options, medicine_options
 
 IST = timedelta(hours=5, minutes=30)
+# Clearly fake addresses. The onboarding screen offers the same ones as quick samples.
+SAMPLE_PLACES = (
+    {
+        "label": "Home",
+        "address": "12 Sample Lane, Demo Nagar (sample address)",
+        "notes": "Gate 2, ground floor",
+    },
+    {
+        "label": "Doctor",
+        "address": "Sunrise Clinic, 4 Example Road (sample address)",
+        "notes": "Dr Mehta",
+    },
+    {
+        "label": "Eye care",
+        "address": "Demo Eye Care, 9 Sample Street (sample address)",
+        "notes": "",
+    },
+)
+
+
+def seed_setup(state: dict, now: float) -> None:
+    """Meera has finished onboarding: places, every demo service and a simulated wallet."""
+    for index, place in enumerate(SAMPLE_PLACES):
+        save_place(state, PlaceIn(**place, is_default_pickup=index == 0), now)
+    for service_type in SERVICE_TYPES:
+        connect(state, service_type, now)
+    state["profile"]["payment_method"] = "DEMO_WALLET"
+    state["onboarding"].update(
+        steps={step: {"status": "done", "at": now} for step in ONBOARDING_STEPS},
+        started_at=now,
+        completed=True,
+        completed_at=now,
+    )
 
 
 def ist(days: int, hour: int, minute: int, now: float) -> float:
@@ -32,6 +67,7 @@ def seed(state: dict, now: float | None = None) -> list[dict]:
         caregiver_name="Asha",
         approval_limit=150,
     )
+    seed_setup(state, now)
     state["appointments"] = [
         {
             "id": "appt-mehta",
