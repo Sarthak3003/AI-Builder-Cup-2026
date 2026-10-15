@@ -363,6 +363,7 @@ def hub_router(config: Settings):
                     state, who["grant_record"], storage=store.mode, catalogue=apps_catalogue()
                 ),
                 **people(state, who),
+                "demo_controls": demo_controls,
             }
         profile = {**state["profile"], "enabled_providers": apps(state)}
         return {

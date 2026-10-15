@@ -4,6 +4,7 @@ import type { Activity } from '../hub'
 import { applyFilters, noFilters } from '../filters'
 import ActivityFilters from '../components/ActivityFilters'
 import ActivityList from '../components/ActivityList'
+import ActivityTimeline from '../components/ActivityTimeline'
 import { UpcomingPlans } from '../components/Plans'
 import type { Hub } from './hubType'
 
@@ -34,6 +35,11 @@ export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simp
         actions={cancel}
         empty={state.activity.length ? <p>Nothing matches these filters.</p> : <><h2>A fresh start</h2><p>Your first request will appear here.</p><a className="primary" href="#/">Explore services</a></>}
       />
+      <section className="card" aria-labelledby="timeline-title">
+        <h2 id="timeline-title">Timeline</h2>
+        <p className="muted">The same record your Care Circle sees, minus anything you have not shared with them.</p>
+        <ActivityTimeline events={state.events ?? []} />
+      </section>
       <details className="audit">
         <summary>Who did what</summary>
         <ul>

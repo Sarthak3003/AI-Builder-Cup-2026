@@ -95,7 +95,7 @@ export type CareState = {
   profile: { name: string; language: Profile['language']; home: string; medicines: string[]; approval_limit: number | null; large_text: boolean; high_contrast: boolean };
   activity: Activity[]; approvals: Activity[]; appointments: Appointment[]; reminders: Reminder[]; contacts: Contact[];
   events: CareEvent[]; circle: Grant[]; conversations: Conversation[]; permissions: Record<string, string>; storage: string; catalogue: CatalogueApp[];
-  demo_people?: DemoPerson[]; demo_person?: string;
+  demo_people?: DemoPerson[]; demo_person?: string; demo_controls?: boolean;
 }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {

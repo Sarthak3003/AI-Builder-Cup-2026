@@ -201,6 +201,56 @@ test('in a loaded demo the profile switches between Meera and her caretakers by 
 
 // ---------- Caretaker ----------
 
+// What the server sends a view-only caretaker: labels instead of addresses, and no payment.
+function shared() {
+  const full = ride()
+  return { ...full, payment: undefined, details: { pickup: { label: 'Home' }, destination: { label: 'Doctor' }, distance_km: 5.3 } }
+}
+
+test('the owner and a caretaker see the same ride event; the caretaker without addresses or payment', async () => {
+  const booked = event({ id: 'ev-ride', ref: ride().id, title: 'Booked (simulated): Uber Go to Doctor', detail: 'Demo Ride Provider · DEMO-RIDE-1042. Demo ride — no real driver will arrive.' })
+  stubApi({}, makeState({ activity: [ride()], events: [booked] }))
+  window.location.hash = '#/activity'
+  const { unmount } = render(<App />)
+  const mine = (await screen.findByRole('heading', { name: 'Timeline' })).closest('section') as HTMLElement
+  expect(within(mine).getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
+  unmount()
+
+  stubApi({}, makeCareState(['view_activity'], { activity: [shared()], events: [booked] }))
+  window.location.hash = `#/activity/${ride().id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
+  expect(screen.getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
+  expect(screen.getByText('Home')).toBeInTheDocument()
+  expect(screen.queryByText(/Sample Lane/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Payment:/)).not.toBeInTheDocument()
+  expect(screen.getByText('not shared with you')).toBeInTheDocument()
+})
+
+test('in the demo a view-only caretaker can try a refused action and sees the server say no', async () => {
+  const calls = stubApi({
+    'POST /bookings/*/cancel': () => fail(403, { detail: 'Only the account owner can perform this action.' }),
+    'POST /bookings/*/decision': () => fail(403, { detail: 'Not shared with you: approve or decline requests sent for approval.' }),
+  }, makeCareState(['view_activity'], { activity: [shared()], demo_controls: true }))
+  window.location.hash = `#/activity/${ride().id}`
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Try to cancel this booking' }))
+  expect(await screen.findByText('Refused by the server: Only the account owner can perform this action.')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Try to approve this booking' }))
+  expect(await screen.findByText('Refused by the server: Not shared with you: approve or decline requests sent for approval.')).toBeInTheDocument()
+  expect(calls.filter((call) => call.url.includes('/bookings/')).map((call) => call.url)).toEqual([
+    `/api/hub/bookings/${ride().id}/cancel`, `/api/hub/bookings/${ride().id}/decision`,
+  ])
+})
+
+test('without demo controls a caretaker gets no permission-check buttons', async () => {
+  stubApi({}, makeCareState(['view_activity'], { activity: [shared()] }))
+  window.location.hash = `#/activity/${ride().id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Try to cancel this booking' })).not.toBeInTheDocument()
+})
+
 test('an invitation link joins this browser as a caretaker', async () => {
   const calls = stubApi({ 'POST /caregiver/join': () => makeCareState(['view_activity']) })
   window.location.hash = '#/join/abc.def'

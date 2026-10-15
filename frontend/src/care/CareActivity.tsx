@@ -5,6 +5,7 @@ import { applyFilters, noFilters } from '../filters'
 import ActivityDetailView from '../components/ActivityDetailView'
 import ActivityFilters from '../components/ActivityFilters'
 import ActivityList from '../components/ActivityList'
+import ActivityTimeline from '../components/ActivityTimeline'
 import { allowed } from './careHub'
 import type { CareHub } from './careHub'
 
@@ -17,7 +18,35 @@ export function CareActivity({ hub }: { hub: CareHub }) {
       <p className="muted">Only what {hub.state.owner.name} shares. All bookings and payments are simulated.</p>
       <ActivityFilters filters={filters} onChange={setFilters} />
       <ActivityList items={applyFilters(hub.state.activity, filters)} empty={<p>Nothing shared yet.</p>} />
+      <section className="card" aria-labelledby="care-timeline-title">
+        <h2 id="care-timeline-title">Timeline</h2>
+        <ActivityTimeline events={hub.state.events} />
+      </section>
     </>
+  )
+}
+
+// Demo only: send a request this caretaker is not allowed to make, and show the server's refusal.
+function PermissionCheck({ hub, item }: { hub: CareHub; item: Activity }) {
+  const [answer, setAnswer] = useState('')
+  const attempt = async (path: string, body?: unknown) => {
+    try {
+      await api(path, 'POST', body)
+      setAnswer('The server allowed this.')
+    } catch (failure) {
+      setAnswer(`Refused by the server: ${failure instanceof Error ? failure.message : 'not allowed'}`)
+    }
+  }
+  return (
+    <section className="card demo-note" aria-labelledby="permission-check-title">
+      <h2 id="permission-check-title">Demo: test the permission check</h2>
+      <p>These buttons send real requests as {hub.state.grant.name}. The server refuses anything this access does not allow; hiding buttons is not the only protection.</p>
+      <div className="actions">
+        <button type="button" className="secondary" onClick={() => void attempt(`/bookings/${item.id}/cancel`)}>Try to cancel this booking</button>
+        {allowed(hub, 'approve') ? null : <button type="button" className="secondary" onClick={() => void attempt(`/bookings/${item.id}/decision`, { action: 'approve' })}>Try to approve this booking</button>}
+      </div>
+      {answer ? <p className="inline-note" role="status">{answer}</p> : null}
+    </section>
   )
 }
 
@@ -64,6 +93,7 @@ export function CareDetail({ hub, id }: { hub: CareHub; id: string }) {
       conversation={state.conversations.find((conv) => conv.request_id && conv.request_id === item.request_id)}
       appointment={state.appointments.find((a) => a.id === item.appointment_id)}
       actions={pending ? <DecisionButtons hub={hub} item={item} /> : null}
+      extra={state.demo_controls ? <PermissionCheck hub={hub} item={item} /> : null}
     />
   )
 }
