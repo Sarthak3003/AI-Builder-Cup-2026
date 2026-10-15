@@ -4,9 +4,13 @@ An accessible everyday companion: call, message, or use the app with one shared 
 
 ## Current state
 
-**Phase 1 (Foundation, `v0.1.0`) is in progress and has not passed its gate.** React + TypeScript (Vite) frontend; Python 3.12 + FastAPI backend with `/health`, `/version` and a Firestore readiness probe (`/ready`). Nothing is deployed, and the GitLab pipeline has not run yet.
+**Phase 1 (Foundation, `v0.1.0`) is in progress and has not passed its gate.** React + TypeScript (Vite) frontend; Python 3.12 + FastAPI backend with `/health`, `/version` and a Firestore readiness probe (`/ready`). Nothing is deployed; the current commit's remote pipeline status has not been checked.
 
-`develop` also carries an unreviewed prototype of later-phase features (commit `89919c2`): local demo sessions, simulated food, ride and medicine requests, caregiver approvals, browser voice and optional Gemini drafting. It runs only in `local` and `test` environments, is not part of Phase 1 acceptance, and each feature still needs its own phase test gate. Evidence, findings and remaining gates are in `docs/phase-1.md`.
+`develop` also carries later-phase prototype features: local demo sessions, simulated food, ride and medicine requests, caregiver approvals, a simplified view, browser voice and optional Gemini text/audio understanding. Anonymous demo sessions run locally and in cloud mode without Google login. Cloud mode still requires a signing secret; visitor data is isolated by browser session for up to 24 hours. Each feature still needs its own phase acceptance gate. Historical evidence and remaining gates are in `docs/phase-1.md`.
+
+## Firebase / Google Cloud setup
+
+The selected deployment uses Firebase Hosting, Firestore, Cloud Run in Mumbai (`asia-south1`) and a server-only Gemini key in Secret Manager. Visitors enter automatically with isolated, signed 24-hour demo sessions; no Google login or Firebase Authentication setup is required. Start with [the deployment guide](docs/deployment.md). `scripts/deploy-google.ps1` requires an explicit new `-ProjectId` and `-GeminiModel`; it generates a local plan unless `-Apply` is supplied. The old deployment passed health checks and owner-confirmed sign-in/Gemini tests before project shutdown was requested. This anonymous-session version has been tested locally, not deployed. Cost review precedes new billable work.
 
 This branch also turns the prototype into a mobile-first, installable web app (PWA) in Google's colours, and adds simulated provider apps: Uber, Ola and Rapido for rides, Uber Eats, Swiggy and Zomato for food. They are clearly labelled demos. Saathi is not connected to those companies, nothing is booked or charged, and a real connection would need each company's approval and the user's own sign-in. The point of the flow is that an older person asks Saathi, reviews the choice and confirms, instead of calling family to book for them.
 
@@ -161,7 +165,7 @@ This starts the image in the `production` environment on an injected `PORT`, the
 `SAATHI_VERSION`: 0.1.0 by default.
 `PORT`: Cloud Run container port, default 8080 in Docker.
 Firestore variables (`SAATHI_FIRESTORE_MODE`, `SAATHI_FIRESTORE_PROJECT`, `FIRESTORE_EMULATOR_HOST`) are described in `docs/firestore.md`.
-Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_FIREBASE_PROJECT`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`.
+Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`.
 
 Do not commit credentials or service-account keys. No credentials are required for local Phase 1. Firebase Hosting and the API share an origin; permissive CORS is unnecessary.
 

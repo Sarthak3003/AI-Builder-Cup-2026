@@ -44,7 +44,7 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
 
       <section className="card">
         <h2>What is still an integration</h2>
-        <p>Live Gemini testing and cloud deployment testing are deferred. Phone calls, WhatsApp and SMS are not connected. Message mode is an in-app preview. Firebase Google sign-in is implemented but needs project configuration. Without it, these are local demo sessions.</p>
+        <p>Phone calls, WhatsApp and SMS are not connected. Message mode is an in-app preview. No sign-in is required: each browser gets a separate demo session.</p>
         <p>Understanding requests: <strong>{state.gemini ? 'Gemini. Microphone recordings are sent to Google to be understood.' : 'simple word matching on this server (not AI). Speech is turned into text by your browser.'}</strong></p>
         <p>Storage: <strong>{state.storage}</strong>. Default local storage persists on this computer. Firestore emulator mode is available.</p>
         <details>

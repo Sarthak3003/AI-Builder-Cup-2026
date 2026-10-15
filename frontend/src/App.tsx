@@ -113,7 +113,7 @@ export default function App() {
             <div className="error" role="alert">
               <p>{error}</p>
               <div className="actions">
-                <button className="secondary" onClick={() => void run(refresh)}>Retry connection</button>
+                <button className="secondary" onClick={() => void run(state ? refresh : start)}>Retry connection</button>
                 <button className="secondary" onClick={() => void run(async () => { await api('/session', 'DELETE'); setState(null); await start() })}>Start a new demo session</button>
               </div>
             </div>
@@ -123,8 +123,8 @@ export default function App() {
           {hub ? screen(hub) : (
             <section className="card">
               <h1 className="page-title">Your everyday companion</h1>
-              <p>Connecting to your local Saathi profile…</p>
-              <button className="primary wide" onClick={() => void start()}>Connect</button>
+              <p>Opening your demo. No sign-in needed.</p>
+              <button className="primary wide" disabled={busy || !online} onClick={() => void start()}>Connect</button>
             </section>
           )}
         </main>

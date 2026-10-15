@@ -6,3 +6,9 @@ dist
 build
 *.egg-info
 .env*
+.venv
+.local
+.git
+*.log
+service-account*.json
+*-credentials.json

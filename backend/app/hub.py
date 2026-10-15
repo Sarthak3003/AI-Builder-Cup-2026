@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.accounts import verify_account
 from app.assistant import configured as gemini_configured
 from app.assistant import draft_request, hear_request
 from app.config import Settings
@@ -95,10 +94,6 @@ class Confirm(BaseModel):
 
 class Decision(BaseModel):
     action: Literal["approve", "reject"]
-
-
-class FirebaseLogin(BaseModel):
-    token: str = Field(min_length=10, max_length=10000)
 
 
 class Join(BaseModel):
@@ -227,21 +222,7 @@ def hub_router(config: Settings):
         if saathi_hub:
             who = identity(saathi_hub)
         else:
-            if config.environment not in {"local", "test"}:
-                raise HTTPException(401, "Sign in with Firebase to continue.")
             who = {"owner": uuid4().hex, "role": "owner", "expires": time.time() + 86400}
-        result = mutate(who, lambda state: public(state, who))
-        cookie(response, who)
-        return result
-
-    @router.post("/auth/firebase")
-    def firebase_login(body: FirebaseLogin, response: Response):
-        uid = verify_account(body.token)
-        who = {
-            "owner": hashlib.sha256(uid.encode()).hexdigest(),
-            "role": "owner",
-            "expires": time.time() + 86400,
-        }
         result = mutate(who, lambda state: public(state, who))
         cookie(response, who)
         return result

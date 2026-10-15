@@ -11,7 +11,7 @@
         "source": "/api/**",
         "run": {
           "serviceId": "saathi-api",
-          "region": "us-central1"
+          "region": "asia-south1"
         }
       },
       {
@@ -32,11 +32,20 @@
             "value": "strict-origin-when-cross-origin"
           }
         ]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       }
     ]
   },
   "firestore": {
-    "rules": "infrastructure/firestore.rules"
+    "rules": "infrastructure/firestore.rules",
+    "indexes": "infrastructure/firestore.indexes.json"
   },
   "emulators": {
     "firestore": {

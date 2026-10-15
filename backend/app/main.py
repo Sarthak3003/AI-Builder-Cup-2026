@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 
 from app.config import Settings
@@ -20,6 +20,14 @@ class VersionResponse(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
     application = FastAPI(title="Saathi API", version=config.version)
+
+    @application.middleware("http")
+    async def private_api_responses(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            # Hosting/CDNs must not retain profiles, session errors or stale readiness.
+            response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/health", response_model=HealthResponse, include_in_schema=False)

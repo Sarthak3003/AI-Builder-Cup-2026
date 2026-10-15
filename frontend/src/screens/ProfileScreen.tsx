@@ -1,6 +1,5 @@
 import { api } from '../hub'
 import type { HubState, Profile } from '../hub'
-import { firebaseConfigured, signIn } from '../firebase'
 import ProfileEditor from '../ProfileEditor'
 import { InstallCard } from '../components/Banners'
 import type { useInstall } from '../usePwa'
@@ -21,15 +20,8 @@ export default function ProfileScreen({ hub, install }: { hub: Hub; install: Ret
       <ProfileEditor key={JSON.stringify(state.profile)} initial={state.profile} busy={busy} save={save} />
       <InstallCard install={install} />
       <section className="card" aria-labelledby="account-title">
-        <h2 id="account-title">Account</h2>
-        {firebaseConfigured ? (
-          <button className="secondary wide" disabled={busy}
-            onClick={() => void run(async () => { setState(await signIn()); window.location.hash = '#/' })}>
-            Sign in with Google
-          </button>
-        ) : (
-          <p className="muted">Google sign-in needs project setup and is not configured in this demo. Local demo sessions work without it.</p>
-        )}
+        <h2 id="account-title">Your demo session</h2>
+        <p className="muted">No sign-in needed. Your profile stays in this browser session for up to 24 hours. A different browser or cleared cookies starts a separate demo.</p>
       </section>
     </>
   )
