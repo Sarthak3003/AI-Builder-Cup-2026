@@ -51,9 +51,10 @@ def test_cloud_blocks_cross_site_mutations_and_does_not_cache_errors(tmp_path, m
 
 def test_cloud_demo_profiles_are_isolated_and_resume(tmp_path, monkeypatch):
     app = cloud_app(tmp_path, monkeypatch)
-    with TestClient(app, base_url="https://api.example") as first, TestClient(
-        app, base_url="https://api.example"
-    ) as second:
+    with (
+        TestClient(app, base_url="https://api.example") as first,
+        TestClient(app, base_url="https://api.example") as second,
+    ):
         profile = first.post("/api/hub/session").json()["profile"]
         profile["name"] = "First visitor"
         assert first.put("/api/hub/profile", json=profile).status_code == 200
