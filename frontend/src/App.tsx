@@ -10,6 +10,7 @@ import { ActivityIcon, AppsIcon, FamilyIcon, HomeIcon, LogoMark, ProfileIcon } f
 import BottomNav from './components/BottomNav'
 import type { Tab } from './components/BottomNav'
 import { OfflineBanner } from './components/Banners'
+import PersonSwitcher from './components/PersonSwitcher'
 import ConnectionStatus from './ConnectionStatus'
 import ActivityScreen from './screens/ActivityScreen'
 import AboutScreen from './screens/AboutScreen'
@@ -128,6 +129,10 @@ export default function App() {
     window.location.hash = '#/'
   })
   const leave = () => void run(async () => { await api('/session', 'DELETE'); setState(null); window.location.hash = '#/'; await start() })
+  const switchTo = (id: string) => void run(async () => {
+    setState(await api<HubState | CareState>('/demo/switch', 'POST', { to: id }))
+    window.location.hash = '#/'
+  })
 
   function ownerScreen(current: Hub) {
     const home = simple ? <SimpleHome hub={current} /> : <Home hub={current} install={install} />
@@ -179,6 +184,7 @@ export default function App() {
           {care ? <a className="avatar" href="#/circle" aria-label="Care Circle and settings">{care.grant.name.slice(0, 1)}</a> : null}
           {owner && !simple ? <a className="avatar" href="#/profile" aria-label="Open profile">{owner.profile.name.slice(0, 1)}</a> : null}
         </header>
+        {state?.demo_people?.length ? <PersonSwitcher people={state.demo_people} current={state.demo_person} busy={busy} onSwitch={switchTo} /> : null}
 
         <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
           {error ? (

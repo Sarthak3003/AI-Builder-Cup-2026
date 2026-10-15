@@ -45,13 +45,16 @@ export type HubState = {
   messages: { role: string; text: string; channel: string }[]; audit: { event: string; request_id: string; at: number; actor?: string }[];
   care_circle?: Grant[]; events?: CareEvent[]; appointments?: Appointment[]; reminders?: Reminder[]; contacts?: Contact[]; conversations?: Conversation[];
   permissions?: Record<string, string>; roles?: Record<Role, string[]>; sensitive?: string[]; demo_controls?: boolean;
+  demo_people?: DemoPerson[]; demo_person?: string;
 }
+export type DemoPerson = { id: string; name: string; role: string }
 // What a caretaker receives: built by the backend from their permissions only.
 export type CareState = {
   role: 'caregiver'; grant: Grant; owner: { name: string; language: Profile['language'] };
   profile: { name: string; language: Profile['language']; home: string; medicines: string[]; approval_limit: number | null; large_text: boolean; high_contrast: boolean };
   activity: Activity[]; approvals: Activity[]; appointments: Appointment[]; reminders: Reminder[]; contacts: Contact[];
   events: CareEvent[]; circle: Grant[]; conversations: Conversation[]; permissions: Record<string, string>; storage: string; catalogue: CatalogueApp[];
+  demo_people?: DemoPerson[]; demo_person?: string;
 }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {

@@ -319,6 +319,41 @@ def test_demo_seed_loads_meera_with_invites_that_work(app, owner):
     assert proposal["appointment_id"] == "appt-mehta"
 
 
+def test_demo_switcher_plays_each_person_in_the_demo_this_browser_loaded(app, owner):
+    seeded = owner.post("/api/hub/demo/seed").json()
+    meera = seeded["state"]
+    people = {person["name"]: person["id"] for person in meera["demo_people"]}
+    assert meera["demo_person"] == "owner" and set(people) == {"Meera", "Asha", "Ravi"}
+
+    switch = lambda to: owner.post("/api/hub/demo/switch", json={"to": to})  # noqa: E731
+    asha = switch(people["Asha"]).json()
+    assert (asha["role"], asha["grant"]["name"], asha["demo_person"]) == (
+        "caregiver",
+        "Asha",
+        people["Asha"],
+    )
+    assert state(owner)["approvals"] and "profile" in state(owner)
+    ride = {"id": str(uuid4()), "service": "ride", "destination": "Market"}
+    assert owner.post("/api/hub/requests", json=ride).status_code == 403
+    ravi = switch(people["Ravi"]).json()
+    assert ravi["grant"]["name"] == "Ravi" and ravi["approvals"] == []
+    back = switch("owner").json()
+    assert (back["role"], back["profile"]["name"]) == ("owner", "Meera")
+
+    owner.delete(f"/api/hub/care-circle/{people['Ravi']}")
+    assert switch(people["Ravi"]).status_code == 404
+    with TestClient(app) as phone:
+        code = seeded["invites"][0]["code"]
+        assert phone.post("/api/hub/caregiver/join", json={"code": code}).status_code == 200
+        assert phone.post("/api/hub/demo/switch", json={"to": "owner"}).status_code == 403
+        assert "demo_people" not in state(phone)
+
+
+def test_switching_needs_a_demo_loaded_in_this_browser(owner):
+    assert owner.post("/api/hub/demo/switch", json={"to": "owner"}).status_code == 403
+    assert "demo_people" not in state(owner)
+
+
 def production(tmp_path, monkeypatch):
     monkeypatch.delenv("FIRESTORE_EMULATOR_HOST", raising=False)
     monkeypatch.setenv("SAATHI_SESSION_SECRET", "test-secret-" * 4)
@@ -342,3 +377,4 @@ def test_demo_controls_are_off_in_production_unless_opted_in(tmp_path, monkeypat
         expected = 200 if enabled else 404
         assert api.post("/api/hub/demo/seed").status_code == expected
         assert api.post("/api/hub/demo/fail-next").status_code == expected
+        assert api.post("/api/hub/demo/switch", json={"to": "owner"}).status_code == expected

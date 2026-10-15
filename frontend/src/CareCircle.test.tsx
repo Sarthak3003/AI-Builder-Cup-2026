@@ -168,6 +168,30 @@ test('without demo controls the profile has no seed or failure buttons', async (
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Your profile' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /Load Meera's demo/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: 'Demo people' })).not.toBeInTheDocument()
+})
+
+test('in a loaded demo one browser switches between Meera and her caretakers', async () => {
+  const people = [{ id: 'owner', name: 'Meera', role: 'Older adult' }, { id: 'g1', name: 'Asha', role: 'Approver' }, { id: 'g2', name: 'Ravi', role: 'Viewer' }]
+  const meera = makeState({ profile: { ...makeState().profile, name: 'Meera' }, demo_people: people, demo_person: 'owner' })
+  const asha = makeCareState(['view_activity', 'approve'], { demo_people: people, demo_person: 'g1' })
+  const calls = stubApi({ 'POST /demo/switch': (body) => ((body as { to: string }).to === 'owner' ? meera : asha) }, meera)
+  window.location.hash = '#/profile'
+  render(<App />)
+  const bar = await screen.findByRole('navigation', { name: 'Demo people' })
+  expect(bar).toHaveTextContent('You are Meera · Older adult')
+  expect(within(bar).getByRole('button', { name: /Meera/ })).toHaveAttribute('aria-pressed', 'true')
+  await userEvent.click(within(bar).getByRole('button', { name: /Asha/ }))
+  expect(calls.find((call) => call.url.endsWith('/demo/switch'))?.body).toEqual({ to: 'g1' })
+  expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
+  expect(window.location.hash).toBe('#/')
+  const switched = screen.getByRole('navigation', { name: 'Demo people' })
+  expect(switched).toHaveTextContent('You are Asha · Approver')
+  await userEvent.click(within(switched).getByRole('button', { name: /Meera/ }))
+  expect(calls.filter((call) => call.url.endsWith('/demo/switch')).at(-1)?.body).toEqual({ to: 'owner' })
+  expect(await screen.findByRole('button', { name: /Meera/, pressed: true })).toBeInTheDocument()
+  expect(screen.getByRole('navigation', { name: 'Demo people' })).toHaveTextContent('You are Meera · Older adult')
+  expect(screen.queryByRole('heading', { name: 'Supporting Meera' })).not.toBeInTheDocument()
 })
 
 // ---------- Caretaker ----------

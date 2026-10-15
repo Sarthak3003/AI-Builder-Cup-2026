@@ -155,6 +155,11 @@ class HomeIn(BaseModel):
     home: str = Field(min_length=1, max_length=150)
 
 
+class SwitchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    to: str = Field(min_length=1, max_length=40)
+
+
 class AssistantRequest(BaseModel):
     id: UUID
     message: str = Field(min_length=3, max_length=1000)
@@ -316,13 +321,30 @@ def hub_router(config: Settings):
         except Exception:
             raise HTTPException(503, "Could not save your changes. Please retry.") from None
 
+    def people(state, who):
+        """Who this demo browser may switch to: only sessions that loaded the demo themselves."""
+        if not (demo_controls and who.get("demo")):
+            return {}
+        everyone = [{"id": "owner", "name": state["profile"]["name"], "role": "Older adult"}]
+        everyone += [
+            {"id": g["id"], "name": g["name"], "role": ROLE_NAMES[g["role"]]}
+            for g in state["care_circle"]
+            if g["status"] != "revoked"
+        ]
+        current = who.get("grant") if who["role"] == "caregiver" else "owner"
+        return {"demo_people": everyone, "demo_person": current}
+
     def public(state, who):
         if who["role"] == "caregiver":
-            return circle_view(
-                state, who["grant_record"], storage=store.mode, catalogue=catalogue()
-            )
+            return {
+                **circle_view(
+                    state, who["grant_record"], storage=store.mode, catalogue=catalogue()
+                ),
+                **people(state, who),
+            }
         profile = {**state["profile"], "enabled_providers": enabled_ids(state["profile"])}
         return {
+            **people(state, who),
             "profile": profile,
             "activity": state["activity"],
             "messages": state["messages"],
@@ -352,7 +374,7 @@ def hub_router(config: Settings):
     def cookie(response, who):
         response.set_cookie(
             "__session",
-            sign(who),
+            sign({key: value for key, value in who.items() if key != "grant_record"}),
             httponly=True,
             secure=config.environment not in {"local", "test"},
             samesite="strict",
@@ -1244,10 +1266,11 @@ def hub_router(config: Settings):
         return mutate(who, store_summary)
 
     @router.post("/demo/seed")
-    def demo_seed(who=actor):
+    def demo_seed(response: Response, who=actor):
         """Demo control: replace this account with Meera's scripted demo and fresh invites."""
         if not demo_controls:
             raise HTTPException(404, "Not available.")
+        who["demo"] = True
 
         def load(state):
             state.clear()
@@ -1260,7 +1283,40 @@ def hub_router(config: Settings):
             record(state, "demo_seeded")
             return {"state": public(state, who), "invites": invites}
 
-        return mutate(who, load, owner_only=True)
+        result = mutate(who, load, owner_only=True)
+        cookie(response, who)
+        return result
+
+    @router.post("/demo/switch")
+    def demo_switch(body: SwitchIn, response: Response, who=actor):
+        """Demo control: one browser plays each person in the demo it loaded, one at a time."""
+        if not demo_controls:
+            raise HTTPException(404, "Not available.")
+        if not who.get("demo"):
+            raise HTTPException(
+                403, "Switching people only works in a demo loaded in this browser."
+            )
+        target = {"owner": who["owner"], "expires": time.time() + 86400, "demo": True}
+
+        def switch(state):
+            if body.to == "owner":
+                target["role"] = "owner"
+            else:
+                grant = next((g for g in state["care_circle"] if g["id"] == body.to), None)
+                if not grant or grant["status"] == "revoked":
+                    raise HTTPException(404, "That person is not in the Care Circle.")
+                if grant["status"] == "invited":
+                    grant.update(status="active", joined_at=time.time())
+                    record(state, "caregiver_linked", grant["id"], grant["name"])
+                target.update(role="caregiver", grant=grant["id"], grant_record=grant)
+            name = target["grant_record"]["name"] if "grant_record" in target else "owner"
+            record(state, "demo_switched", "", name)
+            return public(state, target)
+
+        # The demo flag proves this browser loaded the demo, so it may leave a removed person too.
+        result = mutate({"owner": who["owner"], "role": "owner"}, switch)
+        cookie(response, target)
+        return result
 
     @router.post("/demo/fail-next")
     def fail_next(who=actor):
