@@ -294,7 +294,7 @@ APPS = (
     App("zomato", "Zomato", "FOOD"),
 )
 APP_IDS = tuple(app.id for app in APPS)
-_APP_NAMES = {app.id: app.name for app in APPS}
+APP_NAMES = {app.id: app.name for app in APPS}
 
 
 class RideOption(NamedTuple):
@@ -533,7 +533,7 @@ class DemoRideProvider(_DemoProvider):
             option_id=option.id,
             option_name=option.name,
             app_id=option.app_id,
-            app_name=_APP_NAMES[option.app_id],
+            app_name=APP_NAMES[option.app_id],
             title=f"{option.name} to {destination.label}",
             line_items=[
                 LineItem(label="Base fare", amount_minor=option.base_minor),
@@ -582,7 +582,7 @@ class DemoFoodProvider(_DemoProvider):
             option_id=kitchen.app_id,
             option_name=kitchen.name,
             app_id=kitchen.app_id,
-            app_name=_APP_NAMES[kitchen.app_id],
+            app_name=APP_NAMES[kitchen.app_id],
             title=f"{first}{f' and {more} more' if more else ''} from {kitchen.name}",
             line_items=lines,
             amount_minor=sum(line.amount_minor for line in lines),
@@ -708,7 +708,7 @@ def service_catalogue(enabled_apps: list[str]) -> dict:
                     "id": option.id,
                     "name": option.name,
                     "app_id": option.app_id,
-                    "app_name": _APP_NAMES[option.app_id],
+                    "app_name": APP_NAMES[option.app_id],
                     "pickup_min": option.pickup_min,
                     "enabled": option.app_id in enabled_apps,
                 }
@@ -721,7 +721,7 @@ def service_catalogue(enabled_apps: list[str]) -> dict:
                 {
                     "id": kitchen.app_id,
                     "name": kitchen.name,
-                    "app_name": _APP_NAMES[kitchen.app_id],
+                    "app_name": APP_NAMES[kitchen.app_id],
                     "enabled": kitchen.app_id in enabled_apps,
                     "items": [
                         {

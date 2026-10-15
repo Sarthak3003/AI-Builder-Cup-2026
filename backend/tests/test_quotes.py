@@ -1,0 +1,216 @@
+"""Phase 3: quotes are priced on the server, expire, and never book anything."""
+
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.main import create_app
+
+HOME = {"label": "Home", "address": "12 Sample Lane, Demo Nagar (sample address)"}
+DOCTOR = {"label": "Doctor", "address": "Sunrise Clinic, 4 Example Road (sample address)"}
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAATHI_LOCAL_DB", str(tmp_path / "quotes.db"))
+    return create_app(Settings(environment="test"))
+
+
+@pytest.fixture
+def owner(app):
+    with TestClient(app) as api:
+        assert api.post("/api/hub/session").status_code == 200
+        yield api
+
+
+def ok(response):
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def set_up(api, *services, payment="DEMO_WALLET"):
+    ok(api.post("/api/hub/onboarding/locations", json=HOME))
+    doctor = ok(api.post("/api/hub/onboarding/locations", json=DOCTOR))
+    for service in services or ("RIDE", "FOOD", "PHARMACY"):
+        ok(api.post(f"/api/hub/services/{service}/connect-demo", json={"consent": True}))
+    ok(api.patch("/api/hub/onboarding/profile", json={"payment_method": payment}))
+    return {place["label"]: place["id"] for place in doctor["places"]}
+
+
+def quote(api, **body):
+    return api.post("/api/hub/quotes", json=body)
+
+
+def test_a_ride_request_returns_server_priced_quotes_for_each_switched_on_option(owner):
+    places = set_up(owner)
+    result = ok(quote(owner, service_type="RIDE", destination_place_id=places["Doctor"]))
+    quotes = result["quotes"]
+    assert [q["option_name"] for q in quotes] == ["Rapido Auto", "Ola Mini", "Uber Go"]
+    assert [q["amount_minor"] for q in quotes] == [8300, 12500, 13500]
+    for q in quotes:
+        assert q["provider_label"] == "Demo Ride Provider" and q["simulated"] is True
+        assert q["currency"] == "INR" and q["status"] == "ACTIVE"
+        assert q["amount_minor"] == sum(line["amount_minor"] for line in q["line_items"])
+        assert q["expires_at"] - q["created_at"] == 900
+        assert q["notice"] == "Demo ride — no real driver will arrive."
+        assert q["details"]["pickup"]["label"] == "Home"
+        assert q["details"]["destination"]["label"] == "Doctor"
+        assert q["pickup_eta_min"] and q["duration_min"]
+        assert q["payment_method"] == "DEMO_WALLET" and q["approval"]["required"] is False
+        assert q["request_id"] == result["request_id"]
+    assert len({q["id"] for q in quotes}) == 3
+    state = ok(owner.get("/api/hub/state"))
+    assert state["activity"] == []
+    assert {q["id"] for q in state["quotes"]} == {q["id"] for q in quotes}
+
+
+def test_one_option_typed_destinations_and_saved_place_names(owner):
+    set_up(owner)
+    single = ok(quote(owner, service_type="RIDE", option_id="uber-go", destination_text="Market"))
+    assert [q["option_id"] for q in single["quotes"]] == ["uber-go"]
+    assert single["quotes"][0]["details"]["destination"] == {
+        "label": "Market",
+        "address": "Market",
+        "place_id": None,
+    }
+    named = ok(quote(owner, service_type="RIDE", destination_text="my doctor"))
+    assert named["quotes"][0]["details"]["destination"]["label"] == "Doctor"
+    assert named["quotes"][0]["amount_minor"] == 8300
+
+
+def test_an_unconnected_service_cannot_be_quoted_and_says_how_to_connect(owner):
+    set_up(owner, "FOOD")
+    refused = quote(owner, service_type="RIDE", destination_text="Market")
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "Connect the Demo Ride Provider first, in Services."
+    ok(owner.post("/api/hub/services/FOOD/disconnect"))
+    meal = {"service_type": "FOOD", "option_id": "swiggy", "items": [{"item_id": "khichdi"}]}
+    assert quote(owner, **meal).status_code == 409
+
+
+def test_rides_need_a_pickup_and_a_destination_that_differ(owner):
+    ok(owner.post("/api/hub/services/RIDE/connect-demo", json={"consent": True}))
+    no_pickup = quote(owner, service_type="RIDE", destination_text="Market")
+    assert no_pickup.status_code == 409 and "usual pickup" in no_pickup.json()["detail"]
+    places = set_up(owner, "RIDE")
+    assert quote(owner, service_type="RIDE").status_code == 422
+    same = quote(owner, service_type="RIDE", destination_place_id=places["Home"])
+    assert same.status_code == 422 and same.json()["detail"] == (
+        "Pickup and destination are the same place."
+    )
+    assert quote(owner, service_type="RIDE", destination_place_id="nope").status_code == 404
+
+
+def test_clients_cannot_send_prices_statuses_or_unknown_values(owner):
+    set_up(owner)
+    for body in [
+        {"service_type": "RIDE", "destination_text": "Market", "amount_minor": 1},
+        {"service_type": "RIDE", "destination_text": "Market", "status": "CONSUMED"},
+        {"service_type": "TAXI", "destination_text": "Market"},
+        {"service_type": "RIDE", "destination_text": "Market", "channel": "fax"},
+        {
+            "service_type": "FOOD",
+            "option_id": "swiggy",
+            "items": [{"item_id": "khichdi", "quantity": 9}],
+        },
+        {
+            "service_type": "FOOD",
+            "option_id": "swiggy",
+            "items": [{"item_id": "khichdi", "price": 1}],
+        },
+    ]:
+        assert quote(owner, **body).status_code == 422, body
+    unknown = quote(owner, service_type="RIDE", option_id="helicopter", destination_text="Market")
+    assert unknown.status_code == 422 and unknown.json()["detail"].startswith("Choose one of")
+
+
+def test_switched_off_options_are_neither_offered_nor_quotable(owner):
+    set_up(owner)
+    profile = ok(owner.get("/api/hub/state"))["profile"]
+    profile["enabled_providers"] = ["ola", "zomato"]
+    ok(owner.put("/api/hub/profile", json=profile))
+    rides = ok(quote(owner, service_type="RIDE", destination_text="Market"))["quotes"]
+    assert [q["option_id"] for q in rides] == ["ola-mini"]
+    assert quote(
+        owner, service_type="RIDE", option_id="uber-go", destination_text="X"
+    ).status_code == (409)
+    meal = {"service_type": "FOOD", "option_id": "swiggy", "items": [{"item_id": "khichdi"}]}
+    assert quote(owner, **meal).json()["detail"] == "Swiggy is switched off in Services."
+    profile["enabled_providers"] = ["zomato"]
+    ok(owner.put("/api/hub/profile", json=profile))
+    none = quote(owner, service_type="RIDE", destination_text="Market")
+    assert none.status_code == 409 and "Switch on at least one" in none.json()["detail"]
+
+
+def test_food_and_pharmacy_quotes_itemise_and_label_the_simulation(owner):
+    set_up(owner)
+    meal = ok(
+        quote(
+            owner,
+            service_type="FOOD",
+            option_id="swiggy",
+            items=[{"item_id": "khichdi", "quantity": 2}, {"item_id": "roti"}],
+        )
+    )["quotes"][0]
+    assert meal["amount_minor"] == 2 * 8500 + 2000 + 2500
+    assert (meal["app_name"], meal["provider_label"]) == ("Swiggy", "Demo Food Provider")
+    assert meal["delivery_min"] == 25 and meal["service"] == "food"
+    pharmacy = ok(quote(owner, service_type="PHARMACY", items=[{"item_id": "ors"}]))["quotes"][0]
+    assert pharmacy["amount_minor"] == 6000 + 2000 and pharmacy["service"] == "medicine"
+    assert "not medical advice" in pharmacy["notice"]
+    refused = quote(owner, service_type="PHARMACY", items=[{"item_id": "bp-tablet"}])
+    assert refused.status_code == 422 and refused.json()["detail"].startswith("Choose items")
+
+
+def test_quotes_preview_the_payment_method_and_the_owners_approval_rule(owner):
+    places = set_up(owner, payment="PAY_ON_COMPLETION")
+    profile = ok(owner.get("/api/hub/state"))["profile"]
+    profile.update(caregiver_enabled=True, approval_limit=100)
+    ok(owner.put("/api/hub/profile", json=profile))
+    rides = ok(quote(owner, service_type="RIDE", destination_place_id=places["Doctor"]))["quotes"]
+    preview = {q["option_id"]: q["approval"] for q in rides}
+    assert preview["rapido-auto"] == {"required": False, "reason": ""}
+    assert preview["uber-go"] == {"required": True, "reason": "Above the ₹100 approval limit."}
+    assert {q["payment_method"] for q in rides} == {"PAY_ON_COMPLETION"}
+    pharmacy = ok(quote(owner, service_type="PHARMACY", items=[{"item_id": "ors"}]))["quotes"][0]
+    assert pharmacy["approval"] == {"required": True, "reason": "Pharmacy orders need approval."}
+
+
+def test_expired_quotes_drop_out_of_the_active_list(owner, monkeypatch):
+    set_up(owner)
+    ok(quote(owner, service_type="RIDE", destination_text="Market"))
+    later = time.time() + 901
+    monkeypatch.setattr("app.bookings.time.time", lambda: later)
+    assert ok(owner.get("/api/hub/state"))["quotes"] == []
+
+
+def test_appointment_rides_use_the_saved_appointment(owner):
+    set_up(owner)
+    appointment = ok(
+        owner.post(
+            "/api/hub/appointments",
+            json={
+                "title": "Eye check-up",
+                "place": "Demo Eye Care, 9 Sample Street (sample address)",
+                "starts_at": time.time() + 86400,
+            },
+        )
+    )
+    rides = ok(quote(owner, service_type="RIDE", appointment_id=appointment["id"]))["quotes"]
+    assert rides[0]["appointment_id"] == appointment["id"]
+    assert rides[0]["details"]["destination"]["label"] == "Eye check-up"
+    assert quote(owner, service_type="RIDE", appointment_id="gone").status_code == 404
+
+
+def test_caretakers_and_other_accounts_cannot_request_quotes(app, owner):
+    set_up(owner)
+    code = ok(owner.post("/api/hub/onboarding/caretaker-grants", json={"name": "Asha"}))["code"]
+    with TestClient(app) as asha, TestClient(app) as stranger:
+        ok(asha.post("/api/hub/caregiver/join", json={"code": code}))
+        assert quote(asha, service_type="RIDE", destination_text="Market").status_code == 403
+        ok(stranger.post("/api/hub/session"))
+        refused = quote(stranger, service_type="RIDE", destination_text="Market")
+        assert refused.status_code == 409
+        assert "quotes" not in ok(asha.get("/api/hub/state"))

@@ -17,6 +17,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validat
 
 from app.assistant import Draft, draft_request, hear_request, summarise_conversation
 from app.assistant import configured as gemini_configured
+from app.bookings import QuoteIn, active_quotes, create_quotes
 from app.care import (
     NOT_CHARGED,
     PAID,
@@ -393,6 +394,7 @@ def hub_router(config: Settings):
             "onboarding": {**progress(state), "review": review(state)},
             "places": state["places"],
             "services": services_view(state, apps(state)),
+            "quotes": active_quotes(state),
             "payment_methods": PAYMENT_METHODS,
             "sample_places": SAMPLE_PLACES,
             "permissions": PERMISSIONS,
@@ -581,6 +583,17 @@ def hub_router(config: Settings):
             reset_connection(state, service_type)
             record(state, "service_reset", service_type)
             return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    # --- Quotes: priced by the demo provider on the server; a quote is never a booking ----
+
+    @router.post("/quotes")
+    def quote(body: QuoteIn, who=actor):
+        def save(state):
+            result = create_quotes(state, body, apps(state))
+            record(state, "quoted", result["request_id"])
+            return result
 
         return mutate(who, save, owner_only=True)
 
