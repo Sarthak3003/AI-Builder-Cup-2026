@@ -10,7 +10,6 @@ import { ActivityIcon, AppsIcon, FamilyIcon, HomeIcon, LogoMark, ProfileIcon } f
 import BottomNav from './components/BottomNav'
 import type { Tab } from './components/BottomNav'
 import { OfflineBanner } from './components/Banners'
-import PersonSwitcher from './components/PersonSwitcher'
 import ConnectionStatus from './ConnectionStatus'
 import ActivityScreen from './screens/ActivityScreen'
 import AboutScreen from './screens/AboutScreen'
@@ -142,7 +141,7 @@ export default function App() {
       case 'detail': return <DetailScreen hub={current} id={route.id} />
       case 'apps': return <AppsScreen hub={current} />
       case 'family': return <CareScreen hub={current} />
-      case 'profile': return <ProfileScreen hub={current} install={install} />
+      case 'profile': return <ProfileScreen hub={current} install={install} onSwitch={switchTo} />
       case 'about': return <AboutScreen hub={current} />
       default: return home
     }
@@ -155,7 +154,7 @@ export default function App() {
       case 'approvals': return <Approvals hub={current} />
       case 'conversations': return <Conversations hub={current} />
       case 'safety': return <Safety hub={current} />
-      case 'circle': return <CircleSettings hub={current} onLeave={leave} />
+      case 'circle': return <CircleSettings hub={current} onLeave={leave} onSwitch={switchTo} />
       default: return <Overview hub={current} />
     }
   }
@@ -184,7 +183,6 @@ export default function App() {
           {care ? <a className="avatar" href="#/circle" aria-label="Care Circle and settings">{care.grant.name.slice(0, 1)}</a> : null}
           {owner && !simple ? <a className="avatar" href="#/profile" aria-label="Open profile">{owner.profile.name.slice(0, 1)}</a> : null}
         </header>
-        {state?.demo_people?.length ? <PersonSwitcher people={state.demo_people} current={state.demo_person} busy={busy} onSwitch={switchTo} /> : null}
 
         <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
           {error ? (

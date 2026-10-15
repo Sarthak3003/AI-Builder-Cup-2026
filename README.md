@@ -126,7 +126,7 @@ Booking status (waiting for approval, booked, completed, failed, cancelled, decl
 Demo controls are on automatically when `SAATHI_ENVIRONMENT` is `local` or `test`. Anywhere else they are off unless `SAATHI_DEMO_CONTROLS=1` is set, and the API answers 404.
 
 - **Seed**: Profile → Demo controls → **Load Meera's demo** → confirm. This replaces this browser's demo data with Meera: a check-up with Dr Mehta tomorrow at 10:30 (India time), an eye check-up, reminders (one missed, one done), a medicine reorder waiting for approval, a completed meal, a suspected scam message, trusted contacts, and two pending invitations: **Asha** (Approver, plus summaries, alerts, medicine details and reminders) and **Ravi** (Viewer). The two invitation links are shown on screen. API: `POST /api/hub/demo/seed` with an owner session.
-- **Switch person**: after loading the demo, a yellow **Demo people** bar appears under the top bar. Tap **Meera** (the older adult, with the mic), **Asha** (Approver) or **Ravi** (Viewer) to use the app as that person in the same browser. Switching to a caretaker who has not joined yet joins them; their invitation link still works on another device. The bar only appears in the browser that loaded the demo, never for a caretaker who joined by link, and not at all where demo controls are off. API: `POST /api/hub/demo/switch` with `{"to": "owner"}` or a Care Circle id.
+- **Switch account**: after loading the demo, the profile page shows **Switch account** at the top: Meera's Profile tab, or a caretaker's **Care Circle & settings** (tap the round initial in the top bar). Tap **Meera** (the older adult, with the mic), **Asha** (Approver) or **Ravi** (Viewer) to use the app as that person in the same browser; it opens their home screen. Switching to a caretaker who has not joined yet joins them; their invitation link still works on another device. It only appears in the browser that loaded the demo, never for a caretaker who joined by link, and not at all where demo controls are off. API: `POST /api/hub/demo/switch` with `{"to": "owner"}` or a Care Circle id.
 - **Force a failure**: Profile → Demo controls → **Make the next booking fail**.
 - **Mark a booking completed**: open a booked item in Activity → **Demo: mark completed**. This sets the payment to paid (simulated).
 - **Reset**: About → **Reset demo data** clears this browser's demo, including everyone's Care Circle access.
@@ -135,11 +135,11 @@ All seeded addresses, phone numbers and medicines are labelled as samples.
 
 ### Run the full hackathon demo
 
-Start the backend and frontend (see [Run locally](#run-locally)). The simplest way is one browser window: after step 1, use the **Demo people** bar to switch between Meera, Asha and Ravi. To show two people side by side instead, use **http://127.0.0.1:5173** for Meera and open the caretaker links on **http://localhost:5173** or in a private window. Cookies are per site name, and both names reach the same servers.
+Start the backend and frontend (see [Run locally](#run-locally)). The simplest way is one browser window: after step 1, use **Switch account** on the profile page to move between Meera, Asha and Ravi. To show two people side by side instead, use **http://127.0.0.1:5173** for Meera and open the caretaker links on **http://localhost:5173** or in a private window. Cookies are per site name, and both names reach the same servers.
 
 1. **Meera**: open http://127.0.0.1:5173/#/profile → Load Meera's demo → confirm.
-2. **Asha**: tap **Asha** in the Demo people bar (or open Asha's link on `localhost` or in a private window → Join as caretaker). The Overview shows a medicine request waiting for approval, a suspected scam alert, a missed reminder and tomorrow's check-up.
-3. **Ravi**: tap **Ravi** (or open his link in another private window → Join). He sees shared activity only: no medicine names, payments, conversations, alerts or approval buttons.
+2. **Asha**: on Meera's Profile, tap **Asha** under Switch account (or open Asha's link on `localhost` or in a private window → Join as caretaker). The Overview shows a medicine request waiting for approval, a suspected scam alert, a missed reminder and tomorrow's check-up.
+3. **Ravi**: tap Asha's initial in the top bar → tap **Ravi** (or open his link in another private window → Join). He sees shared activity only: no medicine names, payments, conversations, alerts or approval buttons.
 4. **Care coordination**: as Meera, type or say "Please take me to my doctor's appointment". Saathi uses the saved appointment for the destination. Choose **Ola Mini (₹165)** → **Book with Ola**. It is above Meera's ₹150 limit, so it shows **Sent for approval**, payment **Not charged (simulated)**.
 5. **Delegated approval**: as Asha, Approvals → see why approval is needed → **Approve**. Within seconds Meera's Activity shows **Booked · simulated** and **Pay on completion (simulated) · nothing charged yet**. The details show "Approved by Asha", the appointment, the timeline, and a summary that separates **Confirmed** from **Suggestions (not done)**.
 6. **Permissions hold on the server**: Ravi's Approvals tab says he has no access. Calling the approval API directly as Ravi returns 403 (the end-to-end script checks this).
@@ -151,7 +151,7 @@ Start the backend and frontend (see [Run locally](#run-locally)). The simplest w
 ### Tests for this feature
 
 - Backend: `backend/tests/test_care_circle.py` (roles, sensitive permissions, sharing, separate payment status, forced failure, one decision per request, revocation, invitations, administrator limits) and `backend/tests/test_care_plans.py` (appointments, reminders, coordination, summaries, transcripts, scam, repeated trouble, help, contacts, address, seed, demo person switching, production demo-control lock).
-- Frontend: `frontend/src/CareCircle.test.tsx` (owner Care Circle screens, the caretaker dashboard and the Demo people bar).
+- Frontend: `frontend/src/CareCircle.test.tsx` (owner Care Circle screens, the caretaker dashboard and Switch account).
 - Run them with the normal [Checks](#checks).
 
 ### Implemented and not yet implemented

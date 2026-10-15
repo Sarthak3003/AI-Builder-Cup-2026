@@ -273,10 +273,8 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .simple .footnote { padding-top: 12px; }
 
 /* ---------- Care Circle ---------- */
-.person-switcher { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px; background: var(--yellow-tint); color: var(--yellow-ink); border-bottom: 1px solid var(--line); }
-.person-switcher p { margin: 0; }
 .person-switcher .chip.demo { background: var(--surface); }
-.person-buttons { display: flex; gap: 8px; overflow-x: auto; }
+.person-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .person { display: flex; flex-direction: column; align-items: flex-start; min-height: 48px; padding: 6px 14px; border-radius: 14px; border: 2px solid var(--control-line); background: var(--surface); color: var(--text); text-align: left; }
 .person.current { border-color: var(--blue-strong); background: var(--blue-tint); color: var(--blue-ink); }
 .person:disabled { cursor: default; }

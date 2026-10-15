@@ -31,7 +31,7 @@ export default function DemoControls({ hub }: { hub: Hub }) {
       </button>
       {invites.length ? (
         <div className="invite-box">
-          <p><strong>To see each person's view in this browser,</strong> use the Demo people bar at the top: Meera is the older adult, Asha and Ravi are caretakers.</p>
+          <p><strong>To use Saathi as Asha or Ravi in this browser,</strong> tap their name under Switch account at the top of this page.</p>
           <p>To show two people side by side, open a link below in a private window or on another device:</p>
           {invites.map((invite) => (
             <label key={invite.code} className="field"><span>{invite.name} ({invite.role})</span>

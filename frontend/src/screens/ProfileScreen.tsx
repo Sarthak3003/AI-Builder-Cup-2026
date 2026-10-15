@@ -3,10 +3,11 @@ import type { HubState, Profile } from '../hub'
 import ProfileEditor from '../ProfileEditor'
 import { InstallCard } from '../components/Banners'
 import DemoControls from '../components/DemoControls'
+import PersonSwitcher from '../components/PersonSwitcher'
 import type { useInstall } from '../usePwa'
 import type { Hub } from './hubType'
 
-export default function ProfileScreen({ hub, install }: { hub: Hub; install: ReturnType<typeof useInstall> }) {
+export default function ProfileScreen({ hub, install, onSwitch }: { hub: Hub; install: ReturnType<typeof useInstall>; onSwitch: (id: string) => void }) {
   const { state, busy, run, setState, notify } = hub
 
   const save = (profile: Profile) => void run(async () => {
@@ -17,6 +18,7 @@ export default function ProfileScreen({ hub, install }: { hub: Hub; install: Ret
   return (
     <>
       <h1 className="page-title">Your profile</h1>
+      <PersonSwitcher people={state.demo_people} current={state.demo_person} busy={busy} onSwitch={onSwitch} />
       <ProfileEditor key={JSON.stringify(state.profile)} initial={state.profile} busy={busy} save={save} />
       <InstallCard install={install} />
       <section className="card" aria-labelledby="account-title">

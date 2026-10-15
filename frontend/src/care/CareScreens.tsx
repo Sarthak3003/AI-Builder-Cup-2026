@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, roleLabel } from '../hub'
 import type { Line } from '../hub'
 import AlertList from '../components/AlertList'
+import PersonSwitcher from '../components/PersonSwitcher'
 import SummaryView from '../components/SummaryView'
 import { NotShared } from './CareActivity'
 import { allowed } from './careHub'
@@ -80,7 +81,7 @@ export function Safety({ hub }: { hub: CareHub }) {
   )
 }
 
-export function CircleSettings({ hub, onLeave }: { hub: CareHub; onLeave: () => void }) {
+export function CircleSettings({ hub, onLeave, onSwitch }: { hub: CareHub; onLeave: () => void; onSwitch: (id: string) => void }) {
   const { state, busy, run, refresh, notify } = hub
   const [home, setHome] = useState(state.profile.home)
   const [invite, setInvite] = useState({ name: '', role: 'viewer' })
@@ -89,6 +90,7 @@ export function CircleSettings({ hub, onLeave }: { hub: CareHub; onLeave: () => 
   return (
     <>
       <h1 className="page-title">Care Circle & settings</h1>
+      <PersonSwitcher people={state.demo_people} current={state.demo_person} busy={busy} onSwitch={onSwitch} />
       <section className="card">
         <h2>Your access</h2>
         <p>{state.owner.name} added you as <strong>{roleLabel[state.grant.role]}</strong>. They can change or remove this at any time.</p>
