@@ -8,15 +8,33 @@ import json
 import os
 import secrets
 import time
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 from app.assistant import configured as gemini_configured
 from app.assistant import draft_request, hear_request
+from app.care import (
+    NOT_CHARGED,
+    PAID,
+    PENDING,
+    PERMISSIONS,
+    ROLE_NAMES,
+    ROLES,
+    SENSITIVE,
+    active_grant,
+    actor_name,
+    add_event,
+    circle_view,
+    ensure,
+    need,
+    new_grant,
+    payment,
+    permissions_for,
+)
 from app.config import Settings
 from app.hub_store import HubStore, initial_state
 from app.intent import EMERGENCY, EMERGENCY_WORDS, understand
@@ -30,6 +48,14 @@ from app.providers import (
     medicine_options,
     ride_options,
 )
+
+
+class Sharing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ride: bool = True
+    food: bool = True
+    medicine: bool = True
+    appointments: bool = True
 
 
 class Profile(BaseModel):
@@ -50,6 +76,7 @@ class Profile(BaseModel):
     enabled_providers: list[str] = Field(
         default_factory=lambda: list(PROVIDER_IDS), max_length=len(PROVIDER_IDS)
     )
+    sharing: Sharing = Field(default_factory=Sharing)
 
     @field_validator("enabled_providers")
     @classmethod
@@ -93,21 +120,62 @@ class Confirm(BaseModel):
 
 
 class Decision(BaseModel):
-    action: Literal["approve", "reject"]
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    action: Literal["approve", "reject", "ask"]
+    note: str = Field(default="", max_length=300)
+
+
+def _known_permissions(value):
+    if any(item not in PERMISSIONS for item in value) or len(set(value)) != len(value):
+        raise ValueError("Choose each listed permission at most once.")
+    return value
+
+
+Extras = Annotated[
+    list[str],
+    Field(default_factory=list, max_length=len(PERMISSIONS)),
+    AfterValidator(_known_permissions),
+]
+Role = Literal["viewer", "assistant", "approver", "administrator"]
+
+
+class GrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=60)
+    relationship: str = Field(default="", max_length=40)
+    role: Role = "viewer"
+    extras: Extras
+
+
+class GrantUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Role
+    extras: Extras
+
+
+class ShareUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    shared: bool
 
 
 class Join(BaseModel):
     code: str = Field(min_length=10, max_length=500)
 
 
-def record(state, event, request_id=""):
-    state["audit"].append({"event": event, "request_id": request_id, "at": time.time()})
+def record(state, event, request_id="", actor="owner"):
+    state["audit"].append(
+        {"event": event, "request_id": request_id, "actor": actor, "at": time.time()}
+    )
     state["audit"] = state["audit"][-200:]
 
 
 def hub_router(config: Settings):
     router = APIRouter(prefix="/api/hub")
     store = HubStore(config)
+    # Seed, forced failure and simulated completion: on for local/test, opt-in elsewhere.
+    demo_controls = (
+        config.environment in {"local", "test"} or os.environ.get("SAATHI_DEMO_CONTROLS") == "1"
+    )
     configured_key = os.environ.get("SAATHI_SESSION_SECRET")
     if configured_key:
         if len(configured_key) < 32:
@@ -176,11 +244,13 @@ def hub_router(config: Settings):
             raise HTTPException(403, "Only the account owner can perform this action.")
 
         def checked(state):
-            if who["role"] == "caregiver" and (
-                who["version"] != state["caregiver_version"]
-                or not state["profile"]["caregiver_enabled"]
-            ):
-                raise HTTPException(403, "Caregiver access was revoked.")
+            ensure(state)
+            if who["role"] == "caregiver":
+                grant = active_grant(state, who.get("grant", ""))
+                if not grant:
+                    raise HTTPException(403, "Your Care Circle access was removed.")
+                # Fresh per request: handlers read the grant as it is inside this transaction.
+                who["grant_record"] = grant
             return action(state)
 
         try:
@@ -191,6 +261,10 @@ def hub_router(config: Settings):
             raise HTTPException(503, "Could not save your changes. Please retry.") from None
 
     def public(state, who):
+        if who["role"] == "caregiver":
+            return circle_view(
+                state, who["grant_record"], storage=store.mode, catalogue=catalogue()
+            )
         profile = {**state["profile"], "enabled_providers": enabled_ids(state["profile"])}
         return {
             "profile": profile,
@@ -198,6 +272,18 @@ def hub_router(config: Settings):
             "messages": state["messages"],
             "audit": state["audit"],
             "requests": state["requests"],
+            "care_circle": [
+                {key: value for key, value in grant.items() if key != "invite"}
+                for grant in state["care_circle"]
+            ],
+            "events": state["events"],
+            "appointments": state["appointments"],
+            "reminders": state["reminders"],
+            "contacts": state["contacts"],
+            "permissions": PERMISSIONS,
+            "roles": {role: ROLES[role] for role in ROLES},
+            "sensitive": sorted(SENSITIVE),
+            "demo_controls": demo_controls,
             "role": who["role"],
             "storage": store.mode,
             "mode": "offline-demo",
@@ -242,9 +328,6 @@ def hub_router(config: Settings):
             raise HTTPException(422, "Use medicine labels of 1 to 80 characters.")
 
         def save(state):
-            if state["profile"]["caregiver_enabled"] and not body.caregiver_enabled:
-                state["caregiver_version"] += 1
-                state["invite"] = None
             state["profile"] = body.model_dump()
             record(state, "profile_updated")
             return public(state, who)
@@ -439,8 +522,15 @@ def hub_router(config: Settings):
                 raise HTTPException(
                     409, "That app is turned off in Apps. Turn it on or start again."
                 )
-            needs_approval = p["caregiver_enabled"] and (
-                option["price"] > p["approval_limit"] or proposal["service"] == "medicine"
+            reason = ""
+            if p["caregiver_enabled"] and proposal["service"] == "medicine":
+                reason = "Medicine requests need approval."
+            elif p["caregiver_enabled"] and option["price"] > p["approval_limit"]:
+                reason = f"Above the ₹{p['approval_limit']} approval limit."
+            failed = state["demo"].get("fail_next", False)
+            state["demo"]["fail_next"] = False
+            status = (
+                "failed" if failed else "awaiting_approval" if reason else "simulated_confirmed"
             )
             order = {
                 "id": rid,
@@ -449,103 +539,359 @@ def hub_router(config: Settings):
                 "option": option,
                 "reference": f"SIM-{rid[:8].upper()}",
                 "simulated": True,
-                "status": "awaiting_approval" if needs_approval else "simulated_confirmed",
+                "status": status,
+                "payment": payment(
+                    option["price"], PENDING if status == "simulated_confirmed" else NOT_CHARGED
+                ),
+                "shared": p["sharing"].get(proposal["service"], True),
+                "approval_reason": reason,
+                "appointment_id": proposal.get("appointment_id"),
+                "decision": None,
+                "questions": [],
+                "failure": "Simulated provider failure: nothing was booked or charged."
+                if failed
+                else "",
                 "created_at": time.time(),
             }
             state["activity"].insert(0, order)
             proposal["status"] = order["status"]
-            record(state, "owner_confirmed", rid)
+            label = f"{option['name']} with {option.get('provider_name') or 'Saathi'}"
+            if failed:
+                add_event(
+                    state,
+                    "booking_failed",
+                    f"Booking failed: {label}",
+                    "Simulated failure. Nothing was booked or charged.",
+                    permission="receive_alerts",
+                    ref=rid,
+                    severity="attention",
+                )
+            elif reason:
+                approvers = [
+                    g
+                    for g in state["care_circle"]
+                    if g["status"] == "active" and "approve" in g["permissions"]
+                ]
+                add_event(
+                    state,
+                    "approval_needed",
+                    f"Approval needed: {label}",
+                    reason if approvers else f"{reason} No one in the Care Circle can approve yet.",
+                    permission="approve",
+                    ref=rid,
+                    severity="attention",
+                )
+            else:
+                add_event(state, "booked", f"Booked (simulated): {label}", ref=rid)
+            record(state, "booking_failed" if failed else "owner_confirmed", rid)
             return order
 
         return mutate(who, save, owner_only=True)
 
-    def transition(state, rid, action, who):
+    def find_order(state, rid):
         order = next((item for item in state["activity"] if item["id"] == rid), None)
         if not order:
             raise HTTPException(404, "Activity not found.")
-        target = {"approve": "simulated_confirmed", "reject": "rejected", "cancel": "cancelled"}[
-            action
-        ]
-        if order["status"] == target:
-            return order
-        allowed = (
-            {"awaiting_approval", "simulated_confirmed"}
-            if action == "cancel"
-            else {"awaiting_approval"}
-        )
-        if order["status"] not in allowed:
-            raise HTTPException(409, "This activity can no longer change that way.")
-        order["status"] = target
+        return order
+
+    def sync_proposal(state, rid, status):
         for proposal in state["requests"]:
             if proposal["id"] == rid:
-                proposal["status"] = target
-        record(state, f"{who['role']}_{action}", rid)
+                proposal["status"] = status
+
+    def cancel_order(state, rid):
+        order = find_order(state, rid)
+        if order["status"] == "cancelled":
+            return order
+        if order["status"] not in {"awaiting_approval", "simulated_confirmed"}:
+            raise HTTPException(409, "This activity can no longer change that way.")
+        order["status"] = "cancelled"
+        order["payment"]["status"] = NOT_CHARGED
+        sync_proposal(state, rid, "cancelled")
+        linked = next(
+            (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
+        )
+        add_event(
+            state,
+            "ride_cancelled" if linked else "cancelled",
+            f"Ride for {linked['title']} was cancelled"
+            if linked
+            else f"Cancelled: {order['option']['name']}",
+            "Cancelled by the owner. Nothing was charged.",
+            ref=rid,
+            severity="attention" if linked else "info",
+        )
+        record(state, "owner_cancel", rid)
+        return order
+
+    def decide(state, rid, body, who):
+        need(who, "approve")
+        grant = who["grant_record"]
+        order = find_order(state, rid)
+        item = order["option"]["name"]
+        if body.action == "ask":
+            if order["status"] != "awaiting_approval":
+                raise HTTPException(409, "This request is no longer waiting for approval.")
+            question = body.note or "Could you tell me a little more about this request?"
+            order["questions"].append({"by": grant["name"], "text": question, "at": time.time()})
+            add_event(
+                state,
+                "question",
+                f"{grant['name']} asked about {item}",
+                question,
+                permission="approve",
+                ref=rid,
+                severity="attention",
+                actor=grant["name"],
+            )
+            record(state, "caregiver_ask", rid, grant["name"])
+            return order
+        earlier = order.get("decision")
+        if earlier:
+            if earlier["by"] == grant["id"] and earlier["action"] == body.action:
+                return order
+            done = "approved" if earlier["action"] == "approve" else "declined"
+            raise HTTPException(409, f"Already {done} by {earlier['name']}.")
+        if order["status"] != "awaiting_approval":
+            raise HTTPException(409, "This request is no longer waiting for approval.")
+        approved = body.action == "approve"
+        order["status"] = "simulated_confirmed" if approved else "rejected"
+        order["payment"]["status"] = PENDING if approved else NOT_CHARGED
+        order["decision"] = {
+            "action": body.action,
+            "by": grant["id"],
+            "name": grant["name"],
+            "note": body.note,
+            "at": time.time(),
+        }
+        sync_proposal(state, rid, order["status"])
+        add_event(
+            state,
+            "approved" if approved else "declined",
+            f"{grant['name']} {'approved' if approved else 'declined'} {item}",
+            "Booking confirmed (simulated). Nothing was charged." if approved else body.note,
+            ref=rid,
+            actor=grant["name"],
+        )
+        record(state, f"caregiver_{body.action}", rid, grant["name"])
         return order
 
     @router.post("/activity/{request_id}/cancel")
     def cancel(request_id: UUID, who=actor):
-        return mutate(who, lambda state: transition(state, str(request_id), "cancel", who), True)
+        return mutate(who, lambda state: cancel_order(state, str(request_id)), True)
 
     @router.post("/activity/{request_id}/decision")
     def decision(request_id: UUID, body: Decision, who=actor):
         if who["role"] != "caregiver":
-            raise HTTPException(403, "A linked caregiver must make this decision.")
-        return mutate(who, lambda state: transition(state, str(request_id), body.action, who))
+            raise HTTPException(403, "Approvals come from someone in your Care Circle.")
+        return mutate(who, lambda state: decide(state, str(request_id), body, who))
+
+    @router.put("/activity/{request_id}/sharing")
+    def share(request_id: UUID, body: ShareUpdate, who=actor):
+        def save(state):
+            order = find_order(state, str(request_id))
+            order["shared"] = body.shared
+            record(state, "sharing_changed", order["id"])
+            return order
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/activity/{request_id}/complete")
+    def complete(request_id: UUID, who=actor):
+        """Demo control: the simulated trip or delivery finished and simulated payment settled."""
+        if not demo_controls:
+            raise HTTPException(404, "Not available.")
+
+        def finish(state):
+            order = find_order(state, str(request_id))
+            if order["status"] == "completed":
+                return order
+            if order["status"] != "simulated_confirmed":
+                raise HTTPException(409, "Only a confirmed booking can be completed.")
+            order["status"] = "completed"
+            order["payment"]["status"] = PAID
+            sync_proposal(state, order["id"], "completed")
+            add_event(
+                state,
+                "completed",
+                f"Completed (simulated): {order['option']['name']}",
+                "Simulated payment settled. No real money moved.",
+                ref=order["id"],
+            )
+            record(state, "demo_completed", order["id"])
+            return order
+
+        return mutate(who, finish, owner_only=True)
+
+    @router.post("/demo/fail-next")
+    def fail_next(who=actor):
+        """Demo control: the next confirmed booking fails, so the failure path can be shown."""
+        if not demo_controls:
+            raise HTTPException(404, "Not available.")
+
+        def arm(state):
+            state["demo"]["fail_next"] = True
+            record(state, "demo_fail_next")
+            return {"fail_next": True}
+
+        return mutate(who, arm, owner_only=True)
+
+    def invite_code(owner, grant):
+        token = secrets.token_hex(16)
+        expires = time.time() + 86400
+        grant["invite"] = {"hash": hashlib.sha256(token.encode()).hexdigest(), "expires": expires}
+        return sign({"owner": owner, "grant": grant["id"], "token": token, "expires": expires})
+
+    def summary(grant):
+        return {key: value for key, value in grant.items() if key != "invite"}
+
+    def may_manage(who, role, extras):
+        """Administrators may add viewers and assistants with ordinary permissions only."""
+        if who["role"] == "owner":
+            return
+        need(who, "manage_circle")
+        if role not in {"viewer", "assistant"} or set(extras) & (
+            SENSITIVE | {"approve", "manage_circle"}
+        ):
+            raise HTTPException(
+                403, "Only the account owner can give approval, admin or sensitive permissions."
+            )
+
+    @router.post("/care-circle")
+    def add_person(body: GrantRequest, who=actor):
+        def save(state):
+            may_manage(who, body.role, body.extras)
+            live = [g for g in state["care_circle"] if g["status"] != "revoked"]
+            if len(live) >= 6:
+                raise HTTPException(409, "A Care Circle can have up to six people.")
+            grant = new_grant(body.name, body.relationship, body.role, body.extras, actor_name(who))
+            state["care_circle"].append(grant)
+            code = invite_code(who["owner"], grant)
+            add_event(
+                state,
+                "circle_invited",
+                f"{body.name} was invited as {ROLE_NAMES[body.role]}",
+                permission="manage_circle",
+                actor=actor_name(who),
+            )
+            record(state, "circle_invited", grant["id"], actor_name(who))
+            return {"grant": summary(grant), "code": code}
+
+        return mutate(who, save)
+
+    @router.post("/care-circle/{grant_id}/invite")
+    def reinvite(grant_id: str, who=actor):
+        def save(state):
+            grant = next((g for g in state["care_circle"] if g["id"] == grant_id), None)
+            if not grant or grant["status"] == "revoked":
+                raise HTTPException(404, "That person is not in your Care Circle.")
+            may_manage(who, grant["role"], grant["permissions"])
+            return {"grant": summary(grant), "code": invite_code(who["owner"], grant)}
+
+        return mutate(who, save)
+
+    @router.put("/care-circle/{grant_id}")
+    def change_access(grant_id: str, body: GrantUpdate, who=actor):
+        def save(state):
+            grant = next((g for g in state["care_circle"] if g["id"] == grant_id), None)
+            if not grant or grant["status"] == "revoked":
+                raise HTTPException(404, "That person is not in your Care Circle.")
+            grant["role"] = body.role
+            grant["permissions"] = permissions_for(body.role, body.extras)
+            add_event(
+                state,
+                "circle_changed",
+                f"Access changed for {grant['name']}",
+                ", ".join(PERMISSIONS[p] for p in grant["permissions"]),
+                permission="manage_circle",
+            )
+            record(state, "circle_changed", grant_id)
+            return summary(grant)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.delete("/care-circle/{grant_id}")
+    def remove_person(grant_id: str, who=actor):
+        def save(state):
+            grant = next((g for g in state["care_circle"] if g["id"] == grant_id), None)
+            if not grant or grant["status"] == "revoked":
+                raise HTTPException(404, "That person is not in your Care Circle.")
+            if who["role"] != "owner":
+                may_manage(who, grant["role"], grant["permissions"])
+            grant.update(status="revoked", invite=None, revoked_at=time.time())
+            add_event(
+                state,
+                "circle_removed",
+                f"{grant['name']} no longer has access",
+                permission="manage_circle",
+                actor=actor_name(who),
+            )
+            record(state, "circle_removed", grant_id, actor_name(who))
+            return summary(grant)
+
+        return mutate(who, save)
 
     @router.post("/caregiver/invite")
     def invite(who=actor):
-        def create(state):
-            if not state["profile"]["caregiver_enabled"]:
-                raise HTTPException(409, "Enable caregiver approvals in your profile first.")
-            token = secrets.token_hex(16)
-            state["invite"] = {
-                "hash": hashlib.sha256(token.encode()).hexdigest(),
-                "expires": time.time() + 600,
-            }
-            return {
-                "code": sign(
-                    {"owner": who["owner"], "token": token, "expires": state["invite"]["expires"]}
-                )
-            }
+        """Earlier single-caregiver flow: one approver, named in the profile."""
 
-        return mutate(who, create, True)
+        def save(state):
+            name = state["profile"]["caregiver_name"] or "Caregiver"
+            grant = new_grant(name, "", "approver", [], "owner")
+            state["care_circle"].append(grant)
+            record(state, "circle_invited", grant["id"])
+            return {"code": invite_code(who["owner"], grant), "grant": summary(grant)}
+
+        return mutate(who, save, True)
 
     @router.post("/caregiver/join")
     def join(body: Join, response: Response):
         data = decode(body.code)
-        if "token" not in data:
-            raise HTTPException(400, "Use a caregiver invitation code.")
+        if "token" not in data or "grant" not in data:
+            raise HTTPException(400, "Use a Care Circle invitation code.")
 
         def accept(state):
-            invite = state["invite"]
+            ensure(state)
+            grant = next((g for g in state["care_circle"] if g["id"] == data["grant"]), None)
+            invite = grant and grant["invite"]
             if (
                 not invite
+                or grant["status"] == "revoked"
                 or invite["expires"] < time.time()
                 or not hmac.compare_digest(
                     invite["hash"], hashlib.sha256(data["token"].encode()).hexdigest()
                 )
-                or not state["profile"]["caregiver_enabled"]
             ):
                 raise HTTPException(403, "Invitation expired or already used.")
-            state["invite"] = None
+            grant.update(status="active", invite=None, joined_at=time.time())
             who = {
                 "owner": data["owner"],
                 "role": "caregiver",
+                "grant": grant["id"],
+                "grant_record": grant,
                 "expires": time.time() + 86400,
-                "version": state["caregiver_version"],
             }
-            record(state, "caregiver_linked")
+            add_event(
+                state,
+                "circle_joined",
+                f"{grant['name']} joined the Care Circle",
+                permission="manage_circle",
+                actor=grant["name"],
+            )
+            record(state, "caregiver_linked", grant["id"], grant["name"])
             return who, public(state, who)
 
         who, result = store.change(data["owner"], accept)
+        who.pop("grant_record")
         cookie(response, who)
         return result
 
     @router.delete("/caregiver")
     def revoke(who=actor):
         def remove(state):
-            state["caregiver_version"] += 1
-            state["invite"] = None
+            for grant in state["care_circle"]:
+                if grant["status"] != "revoked":
+                    grant.update(status="revoked", invite=None, revoked_at=time.time())
             record(state, "caregiver_revoked")
             return public(state, who)
 
@@ -554,10 +900,8 @@ def hub_router(config: Settings):
     @router.delete("/data")
     def reset(who=actor):
         def clear(state):
-            version = state["caregiver_version"] + 1
             state.clear()
-            state.update(initial_state())
-            state["caregiver_version"] = version
+            state.update(ensure(initial_state()))
             return public(state, who)
 
         return mutate(who, clear, True)
