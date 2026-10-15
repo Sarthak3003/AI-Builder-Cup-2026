@@ -15,8 +15,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
+from app.assistant import Draft, draft_request, hear_request, summarise_conversation
 from app.assistant import configured as gemini_configured
-from app.assistant import draft_request, hear_request
 from app.care import (
     NOT_CHARGED,
     PAID,
@@ -29,15 +29,27 @@ from app.care import (
     actor_name,
     add_event,
     circle_view,
+    conversation_view,
+    conversation_visible,
     ensure,
     need,
     new_grant,
     payment,
     permissions_for,
+    reminder_view,
+    summarise,
+    visible_events,
 )
 from app.config import Settings
 from app.hub_store import HubStore, initial_state
-from app.intent import EMERGENCY, EMERGENCY_WORDS, understand
+from app.intent import (
+    EMERGENCY,
+    EMERGENCY_WORDS,
+    SCAM,
+    looks_like_scam,
+    mentions_appointment,
+    understand,
+)
 from app.providers import (
     NONE_ENABLED,
     PROVIDER_IDS,
@@ -48,6 +60,7 @@ from app.providers import (
     medicine_options,
     ride_options,
 )
+from app.seed import seed
 
 
 class Sharing(BaseModel):
@@ -97,6 +110,44 @@ class ServiceRequest(BaseModel):
     budget: int | None = Field(default=None, ge=0, le=10000)
     vegetarian: bool | None = None
     mild: bool | None = None
+    appointment_id: str | None = Field(default=None, max_length=40)
+
+
+class AppointmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=80)
+    with_whom: str = Field(default="", max_length=60)
+    place: str = Field(min_length=1, max_length=150)
+    starts_at: float = Field(gt=0)
+    notes: str = Field(default="", max_length=300)
+
+
+class ReminderIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=80)
+    kind: Literal["medicine", "appointment", "other"] = "other"
+    due_at: float = Field(gt=0)
+    notes: str = Field(default="", max_length=300)
+
+
+class ContactIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=60)
+    relationship: str = Field(default="", max_length=40)
+    phone: str = Field(default="", max_length=30)
+    primary: bool = False
+
+
+class HelpIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    kind: Literal["help", "accompany"] = "help"
+    note: str = Field(default="", max_length=300)
+    appointment_id: str | None = Field(default=None, max_length=40)
+
+
+class ResolveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    note: str = Field(default="", max_length=300)
 
 
 class AssistantRequest(BaseModel):
@@ -278,8 +329,9 @@ def hub_router(config: Settings):
             ],
             "events": state["events"],
             "appointments": state["appointments"],
-            "reminders": state["reminders"],
+            "reminders": [reminder_view(r) for r in state["reminders"]],
             "contacts": state["contacts"],
+            "conversations": [conversation_view(c, state) for c in state["conversations"]],
             "permissions": PERMISSIONS,
             "roles": {role: ROLES[role] for role in ROLES},
             "sensitive": sorted(SENSITIVE),
@@ -356,8 +408,18 @@ def hub_router(config: Settings):
             options = []
             clarification = ""
             message = body.message.lower()
+            appointment = None
+            if body.appointment_id:
+                appointment = next(
+                    (a for a in state["appointments"] if a["id"] == body.appointment_id), None
+                )
+                if not appointment:
+                    raise HTTPException(404, "That appointment is no longer saved.")
+            destination = body.destination or (appointment["place"] if appointment else "")
             if any(word in message for word in EMERGENCY_WORDS):
                 clarification = EMERGENCY
+            elif looks_like_scam(body.message):
+                clarification = SCAM
             elif not available(body.service, enabled):
                 clarification = NONE_ENABLED[body.service]
             elif body.service == "food":
@@ -366,10 +428,10 @@ def hub_router(config: Settings):
                 else:
                     options = food_options(enabled, profile["vegetarian"], profile["mild"], budget)
             elif body.service == "ride":
-                if not body.destination:
+                if not destination:
                     clarification = "Enter a destination before comparing demo rides."
                 else:
-                    options = ride_options(enabled, profile["home"], body.destination)
+                    options = ride_options(enabled, profile["home"], destination)
             elif body.medicine not in profile["medicines"]:
                 clarification = "Choose a medicine label already saved in your profile."
             else:
@@ -389,26 +451,107 @@ def hub_router(config: Settings):
                 "expires_at": time.time() + 900,
                 "status": "proposed" if options else "needs_details",
             }
+            if appointment and body.service == "ride":
+                proposal["appointment_id"] = appointment["id"]
+                proposal["summary"] = f"Rides to {appointment['place']} for {appointment['title']}"
             state["requests"].append(proposal)
-            state["messages"].extend(
-                [
-                    {
-                        "role": "user",
-                        "text": body.message or f"Help with {body.service}",
-                        "channel": body.channel,
-                    },
-                    {
-                        "role": "assistant",
-                        "text": clarification or proposal["summary"],
-                        "channel": body.channel,
-                    },
-                ]
+            remember(
+                state,
+                request_id,
+                body.channel,
+                body.message or f"Help with {body.service}",
+                clarification or proposal["summary"],
+                service=body.service,
+                request_id=request_id,
+                destination=destination if body.service == "ride" else "",
+                medicine=body.medicine if body.service == "medicine" else "",
+                options=len(options),
+                safety="suspected_scam" if clarification == SCAM else None,
             )
-            state["messages"] = state["messages"][-100:]
             record(state, "options_proposed", request_id)
             return proposal
 
         return mutate(who, propose, owner_only=True)
+
+    def remember(
+        state,
+        conv_id,
+        channel,
+        said,
+        reply,
+        *,
+        service=None,
+        request_id=None,
+        destination="",
+        medicine="",
+        options=0,
+        safety=None,
+    ):
+        """One interaction: shared history, a conversation record and any safety signal."""
+        now = time.time()
+        state["messages"].extend(
+            [
+                {"role": "user", "text": said, "channel": channel},
+                {"role": "assistant", "text": reply, "channel": channel},
+            ]
+        )
+        state["messages"] = state["messages"][-100:]
+        state["conversations"].insert(
+            0,
+            {
+                "id": conv_id,
+                "request_id": request_id,
+                "channel": channel,
+                "at": now,
+                "service": service,
+                "destination": destination,
+                "medicine": medicine,
+                "options": options,
+                "safety": safety,
+                "transcript": [
+                    {"role": "user", "text": said},
+                    {"role": "assistant", "text": reply},
+                ],
+            },
+        )
+        del state["conversations"][100:]
+        name = state["profile"]["name"]
+        if safety == "suspected_scam":
+            add_event(
+                state,
+                "suspected_scam",
+                "Possible scam message",
+                f"{name} shared a message that looks like a common scam. Saathi did nothing. "
+                "This is a suspicion from word matching, not a confirmed scam.",
+                permission="receive_alerts",
+                severity="attention",
+                certainty="suspected",
+            )
+        elif reply == EMERGENCY:
+            add_event(
+                state,
+                "emergency_mentioned",
+                f"{name} mentioned an emergency",
+                "Saathi cannot respond to emergencies and told them to contact emergency "
+                "services or a trusted person.",
+                permission="receive_alerts",
+                severity="attention",
+            )
+        if options or safety:
+            state["misses"] = []
+            return
+        state["misses"] = [stamp for stamp in state["misses"] if now - stamp < 600] + [now]
+        if len(state["misses"]) >= 3:
+            state["misses"] = []
+            add_event(
+                state,
+                "repeated_trouble",
+                "Saathi had trouble with several requests",
+                f"{name}'s last three requests in ten minutes needed more details. "
+                "Saathi has not assumed anything else.",
+                permission="receive_alerts",
+                severity="attention",
+            )
 
     def ai_profile(state):
         attempts = state.get("ai_attempts", [])
@@ -444,14 +587,31 @@ def hub_router(config: Settings):
             who,
         )
 
-    def routed(request_id, message, channel, draft, question, by, who):
+    def routed(request_id, message, channel, draft, question, by, who, appointment=None):
+        if looks_like_scam(message):
+            draft, question = None, SCAM
         if draft is None or draft.clarification:
+            reply = draft.clarification if draft else question
+            service = draft.service if draft else None
+
+            def note(state):
+                remember(
+                    state,
+                    str(request_id),
+                    channel,
+                    message or "(nothing heard)",
+                    reply,
+                    service=service,
+                    safety="suspected_scam" if reply == SCAM else None,
+                )
+
+            mutate(who, note, owner_only=True)
             return {
                 "id": str(request_id),
-                "service": draft.service if draft else None,
+                "service": service,
                 "channel": channel,
                 "summary": "More details needed",
-                "clarification": draft.clarification if draft else question,
+                "clarification": reply,
                 "options": [],
                 "status": "needs_details",
                 "expires_at": time.time(),
@@ -460,13 +620,33 @@ def hub_router(config: Settings):
             }
         fields = {"service", "destination", "medicine", "budget", "vegetarian", "mild"}
         request = ServiceRequest(
-            id=request_id, message=message, channel=channel, **draft.model_dump(include=fields)
+            id=request_id,
+            message=message,
+            channel=channel,
+            appointment_id=appointment["id"] if appointment else None,
+            **draft.model_dump(include=fields),
         )
         return {**create(request, who), "understood_by": by, "transcript": message}
+
+    def next_appointment(state):
+        now = time.time()
+        upcoming = [
+            a for a in state["appointments"] if now - 3600 < a["starts_at"] < now + 14 * 86400
+        ]
+        return min(upcoming, key=lambda a: a["starts_at"], default=None)
 
     @router.post("/ask")
     def ask(body: AssistantRequest, who=actor):
         """One sentence in, a routed request out. Gemini if configured, else word matching."""
+        profile, appointment = mutate(
+            who, lambda state: (dict(state["profile"]), next_appointment(state)), owner_only=True
+        )
+        if appointment and mentions_appointment(body.message) and not looks_like_scam(body.message):
+            # Saved appointment details beat guessing a destination from the sentence.
+            draft = Draft(service="ride", destination=appointment["place"])
+            return routed(
+                body.id, body.message, body.channel, draft, "", "appointment", who, appointment
+            )
         if gemini_configured():
             profile = mutate(who, ai_profile, owner_only=True)
             try:
@@ -475,8 +655,6 @@ def hub_router(config: Settings):
             except HTTPException as failure:
                 if failure.status_code != 502:
                     raise
-        else:
-            profile = mutate(who, lambda state: dict(state["profile"]), owner_only=True)
         draft, question = understand(body.message, profile)
         return routed(body.id, body.message, body.channel, draft, question, "keywords", who)
 
@@ -583,6 +761,19 @@ def hub_router(config: Settings):
                 )
             else:
                 add_event(state, "booked", f"Booked (simulated): {label}", ref=rid)
+            linked = next(
+                (a for a in state["appointments"] if a["id"] == order["appointment_id"]), None
+            )
+            if linked and not failed:
+                linked["ride_request_id"] = rid
+                add_event(
+                    state,
+                    "appointment_ride",
+                    f"Ride arranged for {linked['title']}",
+                    f"{label} to {linked['place']}. Simulated: no real driver will come.",
+                    ref=rid,
+                    topic="appointments",
+                )
             record(state, "booking_failed" if failed else "owner_confirmed", rid)
             return order
 
@@ -611,6 +802,8 @@ def hub_router(config: Settings):
         linked = next(
             (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
         )
+        if linked:
+            linked["ride_request_id"] = None
         add_event(
             state,
             "ride_cancelled" if linked else "cancelled",
@@ -722,6 +915,291 @@ def hub_router(config: Settings):
             return order
 
         return mutate(who, finish, owner_only=True)
+
+    def find(collection, item_id, what):
+        item = next((entry for entry in collection if entry["id"] == item_id), None)
+        if not item:
+            raise HTTPException(404, f"That {what} is no longer saved.")
+        return item
+
+    def plan_permission(who, kind="appointment"):
+        need(who, "manage_reminders")
+        if kind == "medicine":
+            need(who, "view_medication")
+
+    @router.post("/appointments")
+    def add_appointment(body: AppointmentIn, who=actor):
+        def save(state):
+            plan_permission(who)
+            appointment = {
+                "id": uuid4().hex[:12],
+                **body.model_dump(),
+                "ride_request_id": None,
+                "created_by": actor_name(who),
+                "created_at": time.time(),
+            }
+            state["appointments"].append(appointment)
+            state["appointments"].sort(key=lambda a: a["starts_at"])
+            add_event(
+                state,
+                "appointment_added",
+                f"Appointment added: {body.title}",
+                f"At {body.place}. Added by {actor_name(who)}.",
+                topic="appointments",
+                actor=actor_name(who),
+            )
+            record(state, "appointment_added", appointment["id"], actor_name(who))
+            return appointment
+
+        return mutate(who, save)
+
+    @router.put("/appointments/{appointment_id}")
+    def edit_appointment(appointment_id: str, body: AppointmentIn, who=actor):
+        def save(state):
+            plan_permission(who)
+            appointment = find(state["appointments"], appointment_id, "appointment")
+            appointment.update(body.model_dump())
+            state["appointments"].sort(key=lambda a: a["starts_at"])
+            add_event(
+                state,
+                "appointment_changed",
+                f"Appointment changed: {body.title}",
+                f"Changed by {actor_name(who)}.",
+                topic="appointments",
+                actor=actor_name(who),
+            )
+            record(state, "appointment_changed", appointment_id, actor_name(who))
+            return appointment
+
+        return mutate(who, save)
+
+    @router.delete("/appointments/{appointment_id}")
+    def remove_appointment(appointment_id: str, who=actor):
+        def save(state):
+            plan_permission(who)
+            appointment = find(state["appointments"], appointment_id, "appointment")
+            state["appointments"].remove(appointment)
+            record(state, "appointment_removed", appointment_id, actor_name(who))
+            return {"ok": True}
+
+        return mutate(who, save)
+
+    @router.post("/reminders")
+    def add_reminder(body: ReminderIn, who=actor):
+        def save(state):
+            plan_permission(who, body.kind)
+            reminder = {
+                "id": uuid4().hex[:12],
+                **body.model_dump(),
+                "done_at": None,
+                "created_by": actor_name(who),
+                "created_at": time.time(),
+            }
+            state["reminders"].append(reminder)
+            state["reminders"].sort(key=lambda r: r["due_at"])
+            record(state, "reminder_added", reminder["id"], actor_name(who))
+            return reminder_view(reminder)
+
+        return mutate(who, save)
+
+    @router.put("/reminders/{reminder_id}")
+    def edit_reminder(reminder_id: str, body: ReminderIn, who=actor):
+        def save(state):
+            reminder = find(state["reminders"], reminder_id, "reminder")
+            plan_permission(who, reminder["kind"])
+            plan_permission(who, body.kind)
+            reminder.update(body.model_dump())
+            state["reminders"].sort(key=lambda r: r["due_at"])
+            record(state, "reminder_changed", reminder_id, actor_name(who))
+            return reminder_view(reminder)
+
+        return mutate(who, save)
+
+    @router.delete("/reminders/{reminder_id}")
+    def remove_reminder(reminder_id: str, who=actor):
+        def save(state):
+            reminder = find(state["reminders"], reminder_id, "reminder")
+            plan_permission(who, reminder["kind"])
+            state["reminders"].remove(reminder)
+            record(state, "reminder_removed", reminder_id, actor_name(who))
+            return {"ok": True}
+
+        return mutate(who, save)
+
+    @router.post("/reminders/{reminder_id}/done")
+    def reminder_done(reminder_id: str, who=actor):
+        """The owner says they have dealt with it. Not proof a medicine was taken."""
+
+        def save(state):
+            reminder = find(state["reminders"], reminder_id, "reminder")
+            reminder["done_at"] = reminder["done_at"] or time.time()
+            record(state, "reminder_done", reminder_id)
+            return reminder_view(reminder)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/contacts")
+    def add_contact(body: ContactIn, who=actor):
+        def save(state):
+            need(who, "manage_contacts")
+            if len(state["contacts"]) >= 5:
+                raise HTTPException(409, "Keep up to five trusted contacts.")
+            if body.primary:
+                for contact in state["contacts"]:
+                    contact["primary"] = False
+            contact = {"id": uuid4().hex[:12], **body.model_dump(), "added_by": actor_name(who)}
+            state["contacts"].append(contact)
+            add_event(
+                state,
+                "contacts_changed",
+                f"Trusted contact added: {body.name}",
+                f"Added by {actor_name(who)}.",
+                permission="manage_contacts",
+                actor=actor_name(who),
+            )
+            record(state, "contact_added", contact["id"], actor_name(who))
+            return contact
+
+        return mutate(who, save)
+
+    @router.delete("/contacts/{contact_id}")
+    def remove_contact(contact_id: str, who=actor):
+        def save(state):
+            need(who, "manage_contacts")
+            contact = find(state["contacts"], contact_id, "contact")
+            state["contacts"].remove(contact)
+            add_event(
+                state,
+                "contacts_changed",
+                f"Trusted contact removed: {contact['name']}",
+                f"Removed by {actor_name(who)}.",
+                permission="manage_contacts",
+                actor=actor_name(who),
+            )
+            record(state, "contact_removed", contact_id, actor_name(who))
+            return {"ok": True}
+
+        return mutate(who, save)
+
+    @router.post("/help")
+    def ask_for_help(body: HelpIn, who=actor):
+        """The older adult chooses to tell their Care Circle; nothing is assumed or committed."""
+
+        def save(state):
+            name = state["profile"]["name"]
+            if body.kind == "accompany":
+                appointment = find(state["appointments"], body.appointment_id or "", "appointment")
+                title = f"{name} asked if someone can come to {appointment['title']}"
+                detail = body.note or "No one has agreed yet. Reply to them directly."
+            else:
+                title = f"{name} asked for help"
+                detail = body.note or "Please check in with them."
+            event = add_event(
+                state,
+                "help_requested",
+                title,
+                detail,
+                permission="receive_alerts",
+                severity="attention",
+                actor=name,
+            )
+            remember(
+                state,
+                event["id"],
+                "app",
+                body.note or title,
+                "Your Care Circle was told.",
+                safety="help",
+            )
+            record(state, "help_requested", event["id"])
+            return event
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/events/{event_id}/resolve")
+    def resolve(event_id: str, body: ResolveIn, who=actor):
+        def save(state):
+            if who["role"] == "owner":
+                pool = state["events"]
+            else:
+                need(who, "receive_alerts")
+                pool = visible_events(state, set(who["grant_record"]["permissions"]))
+            event = find(pool, event_id, "alert")
+            if event["status"] != "open":
+                return event
+            event.update(
+                status="resolved",
+                resolved_by=actor_name(who),
+                resolved_at=time.time(),
+                resolution=body.note,
+            )
+            record(state, "alert_resolved", event_id, actor_name(who))
+            return event
+
+        return mutate(who, save)
+
+    def conversation_for(state, who, conversation_id, permission):
+        conv = find(state["conversations"], conversation_id, "conversation")
+        if who["role"] != "owner":
+            need(who, permission)
+            perms = set(who["grant_record"]["permissions"]) | {"view_summaries"}
+            if not conversation_visible(conv, state, perms):
+                raise HTTPException(404, "That conversation is not shared with you.")
+        return conv
+
+    @router.get("/conversations/{conversation_id}/transcript")
+    def transcript(conversation_id: str, who=actor):
+        def read(state):
+            conv = conversation_for(state, who, conversation_id, "view_transcripts")
+            record(state, "transcript_viewed", conversation_id, actor_name(who))
+            return {"id": conv["id"], "transcript": conv["transcript"]}
+
+        return mutate(who, read)
+
+    @router.post("/conversations/{conversation_id}/summary")
+    def ai_summary(conversation_id: str, who=actor):
+        """Gemini rewrites the summary; confirmed actions still come only from records."""
+        if not gemini_configured():
+            raise HTTPException(503, "Gemini is not configured. The automatic summary is shown.")
+
+        def prepare(state):
+            conv = conversation_for(state, who, conversation_id, "view_summaries")
+            ai_profile(state)
+            return conv["transcript"], summarise(conv, state)["confirmed"]
+
+        lines, confirmed = mutate(who, prepare)
+        drafted = summarise_conversation(lines, confirmed)
+
+        def store_summary(state):
+            conv = find(state["conversations"], conversation_id, "conversation")
+            conv["ai_summary"] = {
+                "text": drafted.text,
+                "suggestions": drafted.suggestions,
+                "at": time.time(),
+            }
+            perms = None if who["role"] == "owner" else set(who["grant_record"]["permissions"])
+            return conversation_view(conv, state, perms)
+
+        return mutate(who, store_summary)
+
+    @router.post("/demo/seed")
+    def demo_seed(who=actor):
+        """Demo control: replace this account with Meera's scripted demo and fresh invites."""
+        if not demo_controls:
+            raise HTTPException(404, "Not available.")
+
+        def load(state):
+            state.clear()
+            state.update(ensure(initial_state()))
+            grants = seed(state)
+            invites = [
+                {"name": g["name"], "role": g["role"], "code": invite_code(who["owner"], g)}
+                for g in grants
+            ]
+            record(state, "demo_seeded")
+            return {"state": public(state, who), "invites": invites}
+
+        return mutate(who, load, owner_only=True)
 
     @router.post("/demo/fail-next")
     def fail_next(who=actor):

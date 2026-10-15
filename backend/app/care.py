@@ -129,6 +129,7 @@ def add_event(
     severity="info",
     certainty="confirmed",
     actor="saathi",
+    topic=None,
 ):
     event = {
         "id": uuid4().hex[:12],
@@ -138,6 +139,7 @@ def add_event(
         "detail": detail,
         "permission": permission,
         "ref": ref,
+        "topic": topic,
         "severity": severity,
         "certainty": certainty,
         "actor": actor,
@@ -148,17 +150,118 @@ def add_event(
     return event
 
 
+def _activity(state, ref):
+    return next((a for a in state["activity"] if a["id"] == ref), None)
+
+
 def _shared(state, ref):
-    item = next((a for a in state["activity"] if a["id"] == ref), None)
-    return item is None or item.get("shared", True)
+    item = _activity(state, ref)
+    sharing = state["profile"].get("sharing", {})
+    return item is None or (item.get("shared", True) and sharing.get(item["service"], True))
 
 
 def visible_events(state, perms):
+    plans_shared = state["profile"].get("sharing", {}).get("appointments", True)
     return [
         event
         for event in state["events"]
-        if event["permission"] in perms and (event["ref"] is None or _shared(state, event["ref"]))
+        if event["permission"] in perms
+        and (event["ref"] is None or _shared(state, event["ref"]))
+        and (event.get("topic") != "appointments" or plans_shared or "manage_reminders" in perms)
     ]
+
+
+def reminder_view(reminder, now=None):
+    now = time.time() if now is None else now
+    if reminder.get("done_at"):
+        status = "done"
+    elif reminder["due_at"] < now:
+        status = "missed"
+    else:
+        status = "upcoming"
+    return {**reminder, "status": status}
+
+
+BOOKING_LINES = {
+    "simulated_confirmed": "Booked {name} with {app} (simulated). Nothing charged yet.",
+    "completed": "{name} with {app} completed (simulated).",
+    "awaiting_approval": "Sent {name} with {app} for approval.",
+    "failed": "Booking {name} with {app} failed. Nothing was booked or charged.",
+    "cancelled": "Cancelled {name}. Nothing was charged.",
+    "rejected": "{name} was declined in the Care Circle.",
+}
+
+
+def summarise(conv, state, perms=None):
+    """Confirmed lines come only from stored records; anything else is a suggestion."""
+    owner = perms is None
+    item = _activity(state, conv.get("request_id"))
+    hide_medicine = (
+        conv.get("service") == "medicine" and not owner and "view_medication" not in perms
+    )
+    if conv.get("safety") == "suspected_scam":
+        text = "A message looked like a possible scam. Saathi did nothing and warned about it."
+    elif conv.get("safety") == "help":
+        text = "Asked the Care Circle for help."
+    elif conv.get("service") == "ride":
+        text = f"Asked for a ride to {conv.get('destination') or 'a place'}."
+    elif conv.get("service") == "food":
+        text = "Asked for a meal."
+    elif conv.get("service") == "medicine":
+        text = (
+            "Asked for a medicine reorder."
+            if hide_medicine
+            else (f"Asked to reorder {conv.get('medicine') or 'a saved medicine'}.")
+        )
+    else:
+        text = "Asked Saathi for help."
+    confirmed = []
+    if item:
+        name = "the medicine request" if hide_medicine else item["option"]["name"]
+        app = item["option"].get("provider_name") or "Saathi"
+        confirmed.append(BOOKING_LINES[item["status"]].format(name=name, app=app))
+    elif conv.get("options"):
+        text += f" {conv['options']} options were shown; nothing was booked."
+    elif not conv.get("safety"):
+        text += " Saathi asked for more details; nothing was booked."
+    suggestions = []
+    if item and item.get("appointment_id") and item["status"] == "simulated_confirmed":
+        suggestions.append("Ask whether someone could go along to the appointment.")
+    if item and item["status"] == "failed":
+        suggestions.append("Try again, or offer help from the Care Circle.")
+    if conv.get("safety") == "suspected_scam":
+        suggestions.append("Check in before anyone replies to that message.")
+    ai = conv.get("ai_summary")
+    if ai and not hide_medicine:
+        return {
+            "by": "gemini",
+            "text": ai["text"],
+            "confirmed": confirmed,
+            "suggestions": ai["suggestions"],
+        }
+    return {"by": "rules", "text": text, "confirmed": confirmed, "suggestions": suggestions}
+
+
+def conversation_visible(conv, state, perms):
+    if "view_summaries" not in perms:
+        return False
+    if conv.get("safety"):
+        return "receive_alerts" in perms
+    item = _activity(state, conv.get("request_id"))
+    return item is not None and _shared(state, item["id"])
+
+
+def conversation_view(conv, state, perms=None):
+    item = _activity(state, conv.get("request_id"))
+    view = {
+        key: conv.get(key)
+        for key in ("id", "channel", "at", "service", "request_id", "safety", "seeded")
+    }
+    view["status"] = item["status"] if item else "no_booking"
+    view["summary"] = summarise(conv, state, perms)
+    if perms is None:
+        view["transcript"] = conv["transcript"]
+    return view
 
 
 def activity_for_circle(item, perms):
@@ -218,7 +321,7 @@ def circle_view(state, grant, *, storage, catalogue):
     see_plans = "view_activity" in perms and sharing.get("appointments", True)
     see_reminders = see_plans or "manage_reminders" in perms
     reminders = [
-        r
+        reminder_view(r)
         for r in state["reminders"]
         if see_reminders and (r["kind"] != "medicine" or "view_medication" in perms)
     ]
@@ -246,6 +349,11 @@ def circle_view(state, grant, *, storage, catalogue):
         "reminders": reminders,
         "contacts": state["contacts"] if "manage_contacts" in perms else [],
         "events": visible_events(state, perms),
+        "conversations": [
+            conversation_view(conv, state, perms)
+            for conv in state["conversations"]
+            if conversation_visible(conv, state, perms)
+        ],
         "circle": circle,
         "permissions": PERMISSIONS,
         "storage": storage,

@@ -19,6 +19,53 @@ NOT_UNDERSTOOD = (
 )
 AMBIGUOUS = "Do you need a ride, food or medicine? Please say just one, or tap a choice below."
 NO_DESTINATION = "Where would you like to go? Try “Take me to Dr Mehta's clinic”."
+SCAM = (
+    "This sounds like it could be a scam. Never share an OTP, PIN or bank details, "
+    "and check with someone you trust. Saathi did not do anything."
+)
+# Common Indian fraud phrasings. A match is a suspicion, never a confirmed scam.
+SCAM_WORDS = (
+    "otp",
+    "one time password",
+    "upi pin",
+    "atm pin",
+    "cvv",
+    "kyc",
+    "lottery",
+    "you have won",
+    "prize money",
+    "account will be blocked",
+    "account is blocked",
+    "verify your account",
+    "gift card",
+    "anydesk",
+    "teamviewer",
+    "remote access",
+    "ओटीपी",
+    "लॉटरी",
+    "केवाईसी",
+)
+APPOINTMENT_WORDS = (
+    "doctor",
+    "appointment",
+    "clinic",
+    "check-up",
+    "checkup",
+    "hospital",
+    "डॉक्टर",
+    "अस्पताल",
+)
+
+
+def looks_like_scam(message: str) -> bool:
+    text = message.lower()
+    return any(_has(text, word) for word in SCAM_WORDS)
+
+
+def mentions_appointment(message: str) -> bool:
+    text = message.lower()
+    return any(_has(text, word) for word in APPOINTMENT_WORDS)
+
 
 FOOD_APPS = ("uber eats", "ubereats", "swiggy", "zomato")
 KEYWORDS = {
