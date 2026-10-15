@@ -1,7 +1,10 @@
 type Tone = 'blue' | 'red' | 'yellow' | 'green'
 
 // Decorative Google colours only; these are not the apps' own brand colours.
-const tones: Record<string, Tone> = { uber: 'blue', ola: 'green', rapido: 'yellow', ubereats: 'red', swiggy: 'yellow', zomato: 'blue', pharmacy: 'green' }
+const tones: Record<string, Tone> = {
+  uber: 'blue', ola: 'green', rapido: 'yellow', ubereats: 'red', swiggy: 'yellow', zomato: 'blue',
+  DEMO_RIDE: 'blue', DEMO_FOOD: 'red', DEMO_PHARMACY: 'green',
+}
 
 export default function ProviderBadge({ id, name, demo = true }: { id: string; name: string; demo?: boolean }) {
   return (

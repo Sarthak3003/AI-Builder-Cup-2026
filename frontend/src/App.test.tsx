@@ -2,8 +2,8 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
-import type { Activity, Option, Profile, Proposal, Service } from './hub'
-import { makeCareState, makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
+import type { AskResult, Profile, Quote } from './hub'
+import { booking, fail, makeCareState, makeState, mealQuote, olaQuote, rapidoQuote, rideQuote, stubApi } from './test-utils'
 
 // jsdom cannot decode audio; the real conversion is covered in lib.test.ts.
 vi.mock('./wav', async (original) => ({ ...(await original<typeof import('./wav')>()), toWav: async () => new TextEncoder().encode('RIFF').buffer }))
@@ -17,16 +17,10 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
-const rapidoRide = { id: 'rapido-auto', provider: 'rapido', provider_name: 'Rapido', name: 'Rapido Auto', price: 90, eta_min: 3, simulated: true, detail: 'Demo home to Clinic · Sample fare' }
-const olaRide = { id: 'ola-mini', provider: 'ola', provider_name: 'Ola', name: 'Ola Mini', price: 165, eta_min: 5, simulated: true, detail: 'Demo home to Clinic · Sample fare' }
-
-function proposalOf(service: Service, options: Option[]): Proposal {
-  return { id: '11111111-1111-4111-8111-111111111111', service, channel: 'app', options, clarification: '', summary: `${service} options within ₹200`, status: 'proposed', expires_at: Date.now() / 1000 + 900 }
-}
-function orderOf(option: Option, service: Service = 'ride', status = 'simulated_confirmed'): Activity {
-  return { id: '11111111-1111-4111-8111-111111111111', service, channel: 'app', option, reference: 'SIM-11111111', simulated: true, status, created_at: 1 }
-}
+const rides = () => [rapidoQuote(), olaQuote(), rideQuote()]
+const quoted = (quotes: Quote[]) => ({ request_id: quotes[0].request_id, service_type: quotes[0].service_type, quotes })
 const confirmCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.url.endsWith('/confirm'))
+const quoteCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.method === 'POST' && call.url.endsWith('/quotes'))
 
 test('home greets the user, shows which apps each card compares, and the live status', async () => {
   stubApi()
@@ -61,21 +55,20 @@ class FakeRecognition {
   constructor() { FakeRecognition.last = this }
 }
 const spoken = "Take me to Dr Mehta's clinic"
-const routedRide: Proposal = {
-  id: '22222222-2222-4222-8222-222222222222', service: 'ride', channel: 'voice', options: [rapidoRide, olaRide, uberRide],
-  clarification: '', summary: 'Ride options within ₹200', status: 'proposed', expires_at: Date.now() / 1000 + 900,
-  input: { message: spoken, destination: "Dr Mehta's clinic" },
+const routedRide: AskResult = {
+  id: '22222222-2222-4222-8222-222222222222', service: 'ride', channel: 'voice', status: 'quoted', summary: 'Rides to Doctor', clarification: '',
+  request_id: 'r-1', quotes: rides(), appointment_id: null, input: { message: spoken, destination: "Dr Mehta's clinic" }, understood_by: 'keywords',
 }
-const askedBack = (service: Service | null, clarification: string) => ({
-  id: '33333333-3333-4333-8333-333333333333', service, channel: 'app', options: [], clarification,
-  summary: 'More details needed', status: 'needs_details', expires_at: 0, understood_by: 'keywords',
+const askedBack = (service: AskResult['service'], clarification: string): AskResult => ({
+  id: '33333333-3333-4333-8333-333333333333', service, channel: 'app', status: 'needs_details', summary: 'More details needed', clarification,
+  request_id: null, quotes: [], appointment_id: null, understood_by: 'keywords',
 })
 
-test('one tap on the big microphone: Saathi hears the request, works out the service and opens the options', async () => {
+test('one tap on the big microphone: Saathi hears the request, works out the service and opens the quotes', async () => {
   vi.stubGlobal('SpeechRecognition', FakeRecognition)
   const calls = stubApi({
-    'POST /ask': () => ({ ...routedRide, understood_by: 'keywords' }),
-    'GET /state': () => makeState({ requests: [routedRide] }),
+    'POST /ask': () => routedRide,
+    'GET /state': () => makeState({ quotes: rides() }),
   })
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Just tell Saathi what you need' })).toBeInTheDocument()
@@ -94,9 +87,8 @@ test('one tap on the big microphone: Saathi hears the request, works out the ser
   expect(calls.some((call) => call.url.endsWith('/ask'))).toBe(false)
   act(() => engine?.onresult?.({ results: [{ isFinal: true, 0: { transcript: spoken } }] }))
 
-  expect(await screen.findByRole('heading', { name: 'Ride options within ₹200' })).toBeInTheDocument()
-  expect(window.location.hash).toBe(`#/request/ride/${routedRide.id}`)
-  expect(screen.getByText(`You asked: “${spoken}”`)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toBeInTheDocument()
+  expect(window.location.hash).toBe('#/request/ride/r-1')
   expect(screen.getByRole('button', { name: 'Choose Uber Go from Uber' })).toBeInTheDocument()
   expect(calls.filter((call) => call.url.endsWith('/ask')).map((call) => call.body)).toEqual([expect.objectContaining({ message: spoken, channel: 'voice' })])
   expect(confirmCalls(calls)).toHaveLength(0)
@@ -163,10 +155,9 @@ function fakeMicrophone(allowed = true) {
 test('with Gemini on, the microphone records, Gemini hears and routes it, and nothing is booked yet', async () => {
   const release = fakeMicrophone()
   const said = 'मुझे क्लिनिक जाना है'
-  const heardRide: Proposal = { ...routedRide, input: { message: said, destination: 'क्लिनिक' } }
   const calls = stubApi({
-    'POST /ask/voice': () => ({ ...heardRide, understood_by: 'gemini', transcript: said }),
-    'GET /state': () => makeState({ gemini: true, requests: [heardRide] }),
+    'POST /ask/voice': () => ({ ...routedRide, understood_by: 'gemini', transcript: said, input: { message: said, destination: 'क्लिनिक' } }),
+    'GET /state': () => makeState({ gemini: true, quotes: rides() }),
   }, makeState({ gemini: true }))
   render(<App />)
   expect(await screen.findByText(/Gemini listens · your recording is sent to Google/)).toBeInTheDocument()
@@ -175,8 +166,7 @@ test('with Gemini on, the microphone records, Gemini hears and routes it, and no
   expect(FakeRecorder.last?.state).toBe('recording')
   await userEvent.click(await screen.findByRole('button', { name: 'Listening… tap to stop' }))
 
-  expect(await screen.findByRole('heading', { name: 'Ride options within ₹200' })).toBeInTheDocument()
-  expect(screen.getByText(`You asked: “${said}”`)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toBeInTheDocument()
   expect(release).toHaveBeenCalled()
   const voice = calls.filter((call) => call.url.endsWith('/ask/voice'))
   expect(voice.map((call) => call.body)).toEqual([{ id: expect.any(String), audio: 'UklGRg==' }])
@@ -220,77 +210,115 @@ test('each service has its own form', async () => {
   stubApi()
   window.location.hash = '#/request/ride'
   render(<App />)
-  expect(await screen.findByRole('textbox', { name: 'Where to?' })).toBeInTheDocument()
-  expect(screen.getByText('Uber, Ola, Rapido')).toBeInTheDocument()
+  expect(await screen.findByRole('combobox', { name: 'Where to?' })).toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'Pick me up from' })).toHaveValue('place-home')
   window.location.hash = '#/request/medicine'
-  expect(await screen.findByRole('combobox', { name: 'Saved medicine' })).toBeInTheDocument()
-  expect(screen.queryByRole('textbox', { name: 'Where to?' })).not.toBeInTheDocument()
+  expect(await screen.findByText(/Sample non-prescription items only/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'More: ORS sachets, pack of 5 (sample)' })).toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: 'Where to?' })).not.toBeInTheDocument()
   window.location.hash = '#/request/food'
-  expect(await screen.findByText('Uber Eats, Swiggy, Zomato')).toBeInTheDocument()
-  expect(screen.queryByRole('combobox', { name: 'Saved medicine' })).not.toBeInTheDocument()
+  expect(await screen.findByRole('combobox', { name: 'Kitchen' })).toHaveDisplayValue('Demo Home Kitchen · listed on Swiggy (demo)')
+  expect(screen.getByRole('button', { name: 'Get demo price' })).toBeDisabled()
 })
 
-test('a ride compares apps, needs an explicit review, and books only after the user confirms', async () => {
-  const proposal = proposalOf('ride', [rapidoRide, olaRide, uberRide])
-  const calls = stubApi({ 'POST /requests': () => proposal, 'POST /requests/*/confirm': () => orderOf(uberRide) })
+test('a ride gets server prices, needs an explicit confirmation and books once with a retry key', async () => {
+  const calls = stubApi({ 'POST /quotes': () => quoted(rides()), 'POST /quotes/*/confirm': () => booking(rideQuote()) })
   window.location.hash = '#/request/ride'
   render(<App />)
 
-  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
-  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
-  expect(await screen.findByRole('heading', { name: 'ride options within ₹200' })).toHaveFocus()
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toHaveFocus()
+  expect(quoteCalls(calls).map((call) => call.body)).toEqual([{ service_type: 'RIDE', pickup_place_id: 'place-home', destination_place_id: 'place-doctor' }])
   for (const name of ['Choose Rapido Auto from Rapido', 'Choose Ola Mini from Ola', 'Choose Uber Go from Uber']) {
     expect(screen.getByRole('button', { name })).toBeInTheDocument()
   }
-  expect(screen.getAllByText('Demo').length).toBeGreaterThanOrEqual(3)
+  expect(screen.getAllByText('Simulated by the Demo Ride Provider')).toHaveLength(3)
 
   await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
-  expect(await screen.findByRole('heading', { name: 'Review your request' })).toBeInTheDocument()
-  expect(screen.getByText(/Saathi will book this with Uber for you/)).toBeInTheDocument()
-  expect(screen.getByText(/no real ride is placed and nothing is charged/)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Check and confirm' })).toBeInTheDocument()
+  expect(screen.getByText('Home → Doctor')).toBeInTheDocument()
+  expect(screen.getByText('Demo ride — no real driver will arrive.')).toBeInTheDocument()
+  expect(screen.getByText('Demo wallet (simulated) · no money will be charged')).toBeInTheDocument()
+  expect(screen.getByText('Distance, 5.3 km at ₹16/km')).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(0)
 
   await userEvent.click(screen.getByRole('button', { name: 'Go back' }))
-  expect(screen.queryByRole('button', { name: 'Book with Uber' })).not.toBeInTheDocument()
-  expect(confirmCalls(calls)).toHaveLength(0)
-
+  expect(screen.queryByRole('button', { name: 'Confirm demo booking' })).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
-  expect(await screen.findByRole('heading', { name: 'All done' })).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(1)
-  expect(confirmCalls(calls)[0].body).toEqual({ option_id: 'uber-go', confirmed: true })
-  expect(screen.getByText('Saathi booked Uber Go with Uber for you.')).toBeInTheDocument()
-  expect(screen.getByText('SIM-11111111')).toBeInTheDocument()
-  expect(screen.getByText(/Simulated booking\. No real ride was placed and nothing was charged\./)).toBeInTheDocument()
-  expect(screen.getByText(/no need to call anyone/i)).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'See my activity' })).toHaveAttribute('href', '#/activity')
+  expect(confirmCalls(calls)[0].url).toBe('/api/hub/quotes/q-uber/confirm')
+  expect(confirmCalls(calls)[0].body).toEqual({ idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/), confirmed: true })
+  expect(screen.getByText('DEMO-RIDE-1042')).toBeInTheDocument()
+  expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
+  expect(screen.getByText('Paid (simulated) · no money charged')).toBeInTheDocument()
+  expect(screen.getByText(/No money charged\. Demo ride — no real driver will arrive\./)).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'See booking details' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
+})
+
+test('a lost reply is retried with the same key, so the server can return the same booking', async () => {
+  let attempts = 0
+  const calls = stubApi({
+    'POST /quotes': () => quoted([rideQuote()]),
+    'POST /quotes/*/confirm': () => (++attempts === 1 ? fail(503, { detail: 'Could not save your changes. Please retry.' }) : booking(rideQuote())),
+  })
+  window.location.hash = '#/request/ride'
+  render(<App />)
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Confirm demo booking' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not save your changes. Please retry.')
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
+  const keys = confirmCalls(calls).map((call) => (call.body as { idempotency_key: string }).idempotency_key)
+  expect(keys).toHaveLength(2)
+  expect(keys[0]).toBe(keys[1])
+})
+
+test('a service that is not connected explains how to connect its demo provider', async () => {
+  const state = makeState()
+  state.services = state.services!.map((s) => (s.service_type === 'RIDE' ? { ...s, status: 'SETUP_REQUIRED', consent_at: null } : s))
+  const calls = stubApi({ 'POST /services/RIDE/connect-demo': () => makeState() }, state)
+  window.location.hash = '#/request/ride'
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Connect the Demo Ride Provider first' })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Open Services' })).toHaveAttribute('href', '#/services')
+  expect(screen.queryByRole('button', { name: 'Get demo prices' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Connect Demo Ride Provider' }))
+  expect(calls.find((call) => call.url.endsWith('/connect-demo'))?.body).toEqual({ consent: true })
+  expect(await screen.findByRole('button', { name: 'Get demo prices' })).toBeInTheDocument()
 })
 
 test('a booking that needs caregiver approval says so instead of claiming it is booked', async () => {
-  const state = makeState()
-  state.profile.caregiver_enabled = true
-  const proposal = proposalOf('ride', [uberRide])
-  stubApi({ 'POST /requests': () => proposal, 'POST /requests/*/confirm': () => orderOf(uberRide, 'ride', 'awaiting_approval') }, state)
+  const waiting = rideQuote({ approval: { required: true, reason: 'Above the ₹100 approval limit.' } })
+  stubApi({ 'POST /quotes': () => quoted([waiting]), 'POST /quotes/*/confirm': () => booking(waiting, 'AWAITING_APPROVAL', { approval_reason: 'Above the ₹100 approval limit.' }) })
   window.location.hash = '#/request/ride'
   render(<App />)
-  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
-  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Choose Uber Go from Uber' }))
-  expect(screen.getByText('Someone in your Care Circle must approve this first.')).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  expect(await screen.findByText(/Someone in your Care Circle must approve this first\. Above the ₹100 approval limit\./)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
   expect(await screen.findByRole('heading', { name: 'Sent for approval' })).toBeInTheDocument()
+  expect(screen.getByText('Not charged (simulated)')).toBeInTheDocument()
   expect(screen.queryByText(/Saathi booked/)).not.toBeInTheDocument()
+  expect(screen.queryByText('DEMO-RIDE-1042')).not.toBeInTheDocument()
 })
 
-test('a meal compares the food apps and names the kitchen and delivery time', async () => {
-  const proposal = proposalOf('food', [swiggyMeal])
-  stubApi({ 'POST /requests': () => proposal })
+test('a meal is chosen from a kitchen menu and priced by the server with a demo delivery fee', async () => {
+  const calls = stubApi({ 'POST /quotes': () => quoted([mealQuote({ amount_minor: 19500, line_items: [{ label: 'Vegetable khichdi × 2', amount_minor: 17000 }, { label: 'Delivery fee (demo)', amount_minor: 2500 }] })]) })
   window.location.hash = '#/request/food'
   render(<App />)
-  await userEvent.click(await screen.findByRole('button', { name: 'Show options' }))
-  expect(await screen.findByRole('button', { name: 'Choose Vegetable khichdi from Swiggy' })).toBeInTheDocument()
-  expect(screen.getByText('About 25 min')).toBeInTheDocument()
-  expect(screen.getByText(/From Demo Home Kitchen/)).toBeInTheDocument()
+  const more = await screen.findByRole('button', { name: 'More: Vegetable khichdi' })
+  await userEvent.click(more)
+  await userEvent.click(more)
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo price' }))
+  expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'FOOD', option_id: 'swiggy', items: [{ item_id: 'khichdi', quantity: 2 }] })
+  expect(await screen.findByRole('heading', { name: 'Check and confirm' })).toBeInTheDocument()
+  expect(screen.getByText('Vegetable khichdi × 2')).toBeInTheDocument()
+  expect(screen.getByText('Delivery fee (demo)')).toBeInTheDocument()
+  expect(screen.getByText('Demo order — no real food will be delivered.')).toBeInTheDocument()
 })
 
 test('turning an option off saves the choice, and the page is honest that these are demos', async () => {
@@ -306,7 +334,7 @@ test('turning an option off saves the choice, and the page is honest that these 
   expect(save, 'the profile was never saved').toBeDefined()
   const sent = (save!.body as { enabled_providers: string[] }).enabled_providers
   expect(sent).not.toContain('uber')
-  expect(sent).toEqual(expect.arrayContaining(['ola', 'rapido', 'ubereats', 'swiggy', 'zomato', 'pharmacy']))
+  expect(sent).toEqual(['ola', 'rapido', 'ubereats', 'swiggy', 'zomato'])
   await waitFor(() => expect(screen.getByRole('switch', { name: 'Use Uber' })).not.toBeChecked())
 })
 
@@ -315,8 +343,8 @@ test('a caretaker gets the Care Circle dashboard, never the request screens', as
   window.location.hash = '#/request/ride'
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
-  expect(screen.queryByRole('textbox', { name: 'Where to?' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Show options' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('combobox', { name: 'Where to?' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Get demo prices' })).not.toBeInTheDocument()
   const nav = screen.getByRole('navigation', { name: 'Main navigation' })
   expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Overview', 'Activity', 'Approvals', 'Chats', 'Safety'])
 })
@@ -412,43 +440,40 @@ test('the simplified view switch strips Home down to the mic, three tiles and a 
   expect(saves).toEqual([true, false])
 })
 
-test('in simplified view a booking is one field, big choices, "Book this?" and Done, still marked as demo', async () => {
+test('in simplified view a booking is one choice, big buttons, "Book this?" and Done, still marked as demo', async () => {
   const state = makeState()
   state.profile.simple = true
-  const calls = stubApi({ 'POST /requests': () => proposalOf('ride', [rapidoRide, uberRide]), 'POST /requests/*/confirm': () => orderOf(uberRide) }, state)
+  const calls = stubApi({ 'POST /quotes': () => quoted([rapidoQuote(), rideQuote()]), 'POST /quotes/*/confirm': () => booking(rideQuote()) }, state)
   window.location.hash = '#/request/ride'
   render(<App />)
-  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
-  expect(screen.getAllByRole('textbox')).toHaveLength(1)
-  expect(screen.queryByText('More options')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Use microphone' })).not.toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
 
   expect(await screen.findByRole('heading', { name: 'Pick one' })).toBeInTheDocument()
-  expect(screen.queryByText(/Sample fare/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Simulated by the/)).not.toBeInTheDocument()
   expect(screen.getAllByText('Demo').length).toBeGreaterThanOrEqual(2)
   await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
   expect(await screen.findByRole('heading', { name: 'Book this?' })).toBeInTheDocument()
-  expect(screen.getByText('Demo only. Nothing is really booked or paid.')).toBeInTheDocument()
+  expect(screen.getByText('Demo ride — no real driver will arrive.')).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(0)
-  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
 
-  expect(await screen.findByRole('heading', { name: 'Booked' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(1)
   expect(screen.getByRole('link', { name: 'Done' })).toHaveAttribute('href', '#/')
-  expect(screen.queryByText('SIM-11111111')).not.toBeInTheDocument()
 })
 
 test('simplified Activity shows only what was booked, its status and Cancel', async () => {
-  const state = makeState({ activity: [orderOf(uberRide)] })
+  const state = makeState({ activity: [booking(rideQuote())] })
   state.profile.simple = true
   stubApi({}, state)
   window.location.hash = '#/activity'
   render(<App />)
-  expect(await screen.findByRole('heading', { name: 'Uber Go' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
   expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Cancel request' })).toBeInTheDocument()
-  for (const gone of [/Activity audit/, /SIM-11111111/, /Sample fare/, /Refresh activity/, /whichever way you ask/]) {
+  expect(screen.getByRole('button', { name: 'Cancel booking' })).toBeInTheDocument()
+  for (const gone of [/Activity audit/, /DEMO-RIDE-1042/, /Simulated by the/, /whichever way you ask/]) {
     expect(screen.queryByText(gone)).not.toBeInTheDocument()
   }
 })

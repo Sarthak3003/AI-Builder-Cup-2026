@@ -4,6 +4,7 @@ import time
 from uuid import uuid4
 
 import pytest
+from booking_helpers import confirm, ok, ready
 from fastapi.testclient import TestClient
 
 from app.assistant import Summary
@@ -23,6 +24,7 @@ def app(tmp_path, monkeypatch):
 def owner(app):
     with TestClient(app) as api:
         api.post("/api/hub/session")
+        ready(api)
         yield api
 
 
@@ -110,21 +112,19 @@ def test_missed_reminders_are_flagged_and_done_is_not_proof_of_medicine(app, own
 def test_doctor_request_uses_the_saved_appointment_and_caretaker_sees_the_ride(app, owner):
     appt = appointment(owner).json()
     viewer = join(app, owner, "Ravi")
-    proposal = ask(owner, "Please take me to my doctor's appointment", "voice")
-    assert (proposal["service"], proposal["understood_by"]) == ("ride", "appointment")
-    assert proposal["appointment_id"] == appt["id"]
-    assert "Sunrise Clinic" in proposal["summary"]
-    assert all("Sunrise Clinic" in option["detail"] for option in proposal["options"])
-    order = owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": proposal["options"][0]["id"], "confirmed": True},
-    ).json()
+    asked = ask(owner, "Please take me to my doctor's appointment", "voice")
+    assert (asked["service"], asked["understood_by"]) == ("ride", "appointment")
+    assert asked["appointment_id"] == appt["id"]
+    assert "Sunrise Clinic" in asked["summary"]
+    assert all(q["appointment_id"] == appt["id"] for q in asked["quotes"])
+    assert all(q["details"]["destination"]["label"] == appt["title"] for q in asked["quotes"])
+    order = ok(confirm(owner, asked["quotes"][0]))
     assert order["appointment_id"] == appt["id"]
     assert state(owner)["appointments"][0]["ride_request_id"] == order["id"]
     seen = state(viewer)
     assert seen["activity"][0]["appointment_id"] == appt["id"]
     assert any(e["kind"] == "appointment_ride" for e in seen["events"])
-    owner.post(f"/api/hub/activity/{order['id']}/cancel")
+    owner.post(f"/api/hub/bookings/{order['id']}/cancel")
     after = state(viewer)
     cancelled = [e for e in after["events"] if e["kind"] == "ride_cancelled"]
     assert cancelled and cancelled[0]["severity"] == "attention"
@@ -134,30 +134,26 @@ def test_doctor_request_uses_the_saved_appointment_and_caretaker_sees_the_ride(a
 def test_an_appointment_ride_is_only_called_arranged_once_approved(app, owner):
     appointment(owner)
     profile = state(owner)["profile"]
-    profile.update(caregiver_enabled=True, approval_limit=100)
+    profile.update(caregiver_enabled=True, approval_limit=50)
     owner.put("/api/hub/profile", json=profile)
     asha = join(app, owner, "Asha", "approver")
-    proposal = ask(owner, "Take me to the doctor")
-    owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": "uber-go", "confirmed": True},
-    )
+    asked = ask(owner, "Take me to the doctor")
+    uber = next(q for q in asked["quotes"] if q["option_id"] == "uber-go")
+    order = ok(confirm(owner, uber))
+    assert order["booking_status"] == "AWAITING_APPROVAL"
     titles = [e["title"] for e in state(owner)["events"] if e["kind"] == "appointment_ride"]
     assert titles == ["Ride for Check-up with Dr Mehta is waiting for approval"]
-    asha.post(f"/api/hub/activity/{proposal['id']}/decision", json={"action": "approve"})
+    asha.post(f"/api/hub/bookings/{order['id']}/decision", json={"action": "approve"})
     titles = [e["title"] for e in state(owner)["events"] if e["kind"] == "appointment_ride"]
     assert titles[0] == "Ride arranged for Check-up with Dr Mehta"
 
 
 def test_summaries_separate_confirmed_actions_from_suggestions(app, owner):
     appointment(owner)
-    proposal = ask(owner, "Take me to the doctor")
+    asked = ask(owner, "Take me to the doctor")
     early = state(owner)["conversations"][0]["summary"]
     assert early["confirmed"] == [] and "nothing was booked" in early["text"]
-    owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": proposal["options"][0]["id"], "confirmed": True},
-    )
+    ok(confirm(owner, asked["quotes"][0]))
     summary = state(owner)["conversations"][0]["summary"]
     assert summary["by"] == "rules"
     assert summary["confirmed"][0].startswith("Booked") and "(simulated)" in summary["confirmed"][0]
@@ -165,11 +161,8 @@ def test_summaries_separate_confirmed_actions_from_suggestions(app, owner):
 
 
 def test_summaries_and_transcripts_need_separate_permissions(app, owner):
-    proposal = ask(owner, "Take me to the market")
-    owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": proposal["options"][0]["id"], "confirmed": True},
-    )
+    asked = ask(owner, "Take me to the market")
+    order = ok(confirm(owner, asked["quotes"][0]))
     viewer = join(app, owner, "Ravi")
     reader = join(app, owner, "Asha", "viewer", ["view_summaries"])
     full = join(app, owner, "Kiran", "viewer", ["view_summaries", "view_transcripts"])
@@ -180,7 +173,7 @@ def test_summaries_and_transcripts_need_separate_permissions(app, owner):
     assert reader.get(path).status_code == 403
     assert viewer.get(path).status_code == 403
     assert full.get(path).json()["transcript"][0]["text"] == "Take me to the market"
-    owner.put(f"/api/hub/activity/{proposal['id']}/sharing", json={"shared": False})
+    owner.put(f"/api/hub/bookings/{order['id']}/sharing", json={"shared": False})
     assert full.get(path).status_code == 404
     assert state(full)["conversations"] == []
     assert any(
@@ -188,24 +181,24 @@ def test_summaries_and_transcripts_need_separate_permissions(app, owner):
     )
 
 
-def test_medicine_summaries_hide_names_without_medication_permission(app, owner):
-    medicine = state(owner)["profile"]["medicines"][0]
-    owner.post(
-        "/api/hub/requests",
-        json={"id": str(uuid4()), "service": "medicine", "medicine": medicine},
-    )
-    proposal = state(owner)["requests"][0]
-    owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": proposal["options"][0]["id"], "confirmed": True},
-    )
+def test_pharmacy_summaries_hide_item_names_without_medication_permission(app, owner):
+    asked = ask(owner, "Please order ORS sachets")
+    assert asked["service"] == "medicine" and asked["quotes"][0]["title"].startswith("ORS")
+    ok(confirm(owner, asked["quotes"][0]))
     reader = join(app, owner, "Asha", "viewer", ["view_summaries"])
     text = str(state(reader)["conversations"])
-    assert medicine not in text and "medicine" in text.lower()
+    assert "ORS" not in text and "pharmacy order" in text
+
+
+def test_prescription_medicine_is_never_quoted(owner):
+    asked = ask(owner, "Please reorder my BP tablets")
+    assert (asked["service"], asked["quotes"]) == ("medicine", [])
+    assert "cannot order prescription medicines" in asked["clarification"]
+    assert state(owner)["quotes"] == []
 
 
 def test_gemini_summary_never_decides_what_was_confirmed(app, owner, monkeypatch):
-    proposal = ask(owner, "Take me to the market")
+    asked = ask(owner, "Take me to the market")
     conv = state(owner)["conversations"][0]["id"]
     assert owner.post(f"/api/hub/conversations/{conv}/summary").status_code == 503
     monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
@@ -222,10 +215,7 @@ def test_gemini_summary_never_decides_what_was_confirmed(app, owner, monkeypatch
         "confirmed": [],
         "suggestions": ["Offer to go along."],
     }
-    owner.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": proposal["options"][0]["id"], "confirmed": True},
-    )
+    ok(confirm(owner, asked["quotes"][0]))
     assert state(owner)["conversations"][0]["summary"]["confirmed"][0].startswith("Booked")
 
 
@@ -234,7 +224,7 @@ def test_suspected_scam_is_flagged_as_a_suspicion_and_nothing_happens(app, owner
     assert reply["status"] == "needs_details" and "scam" in reply["clarification"]
     events = [e for e in state(owner)["events"] if e["kind"] == "suspected_scam"]
     assert events[0]["certainty"] == "suspected"
-    assert state(owner)["requests"] == []
+    assert state(owner)["quotes"] == []
     alerts = join(app, owner, "Asha", "viewer", ["receive_alerts", "view_summaries"])
     viewer = join(app, owner, "Ravi")
     reader = join(app, owner, "Kiran", "viewer", ["view_summaries"])
@@ -311,12 +301,19 @@ def test_demo_seed_loads_meera_with_invites_that_work(app, owner):
     ravi = TestClient(app)
     ravi.post("/api/hub/caregiver/join", json={"code": seeded["invites"][1]["code"]})
     approvals = state(asha)["approvals"]
-    assert approvals[0]["option"]["name"].startswith("BP tablet")
+    assert approvals[0]["title"].startswith("ORS sachets")
+    assert approvals[0]["approval_reason"] == "Pharmacy orders need approval."
     seen_by_ravi = state(ravi)
-    assert "BP tablet" not in str(seen_by_ravi["activity"])
+    assert "ORS" not in str(seen_by_ravi["activity"])
     assert seen_by_ravi["conversations"] == [] and seen_by_ravi["contacts"] == []
-    proposal = ask(owner, "Take me to my doctor's appointment")
-    assert proposal["appointment_id"] == "appt-mehta"
+    meal = next(b for b in state(owner)["activity"] if b["service"] == "food")
+    assert (meal["booking_status"], meal["payment"]["status"]) == (
+        "COMPLETED_SIMULATED",
+        "SUCCEEDED_SIMULATED",
+    )
+    assert meal["provider_booking_id"] == "DEMO-FOOD-1042"
+    asked = ask(owner, "Take me to my doctor's appointment")
+    assert asked["appointment_id"] == "appt-mehta"
 
 
 def test_demo_switcher_plays_each_person_in_the_demo_this_browser_loaded(app, owner):
@@ -333,8 +330,8 @@ def test_demo_switcher_plays_each_person_in_the_demo_this_browser_loaded(app, ow
         people["Asha"],
     )
     assert state(owner)["approvals"] and "profile" in state(owner)
-    ride = {"id": str(uuid4()), "service": "ride", "destination": "Market"}
-    assert owner.post("/api/hub/requests", json=ride).status_code == 403
+    ride = {"service_type": "RIDE", "destination_text": "Market"}
+    assert owner.post("/api/hub/quotes", json=ride).status_code == 403
     ravi = switch(people["Ravi"]).json()
     assert ravi["grant"]["name"] == "Ravi" and ravi["approvals"] == []
     back = switch("owner").json()

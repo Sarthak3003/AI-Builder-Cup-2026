@@ -31,20 +31,35 @@ export type DemoService = {
 }
 export type Sharing = { ride: boolean; food: boolean; medicine: boolean; appointments: boolean }
 export type Service = 'food' | 'ride' | 'medicine'
-export type Option = {
-  id: string; name: string; price: number; detail: string;
-  provider?: string; provider_name?: string; eta_min?: number; simulated?: boolean;
+export type CatalogueApp = { id: string; name: string; service: Service; service_type?: ServiceType; simulated: boolean }
+export type BookingStatus = 'AWAITING_APPROVAL' | 'CONFIRMED_SIMULATED' | 'COMPLETED_SIMULATED' | 'FAILED' | 'CANCELLED_SIMULATED' | 'DECLINED'
+export type PaymentStatus = 'PENDING_SIMULATED' | 'SUCCEEDED_SIMULATED' | 'FAILED_SIMULATED' | 'NOT_CHARGED_SIMULATED'
+export type LineItem = { label: string; amount_minor: number }
+export type PlaceSnapshot = { label: string; address?: string; place_id?: string | null }
+export type OrderItem = { item_id?: string; name: string; quantity: number; unit_minor?: number; vegetarian?: boolean; mild?: boolean }
+export type Details = { pickup?: PlaceSnapshot; destination?: PlaceSnapshot; distance_km?: number | null; kitchen?: string; items?: OrderItem[] }
+// What a demo provider offered. Caretakers receive a trimmed copy without addresses or payment.
+type Offer = {
+  service: Service; service_type: ServiceType; provider_type: string; provider_label: string; option_id?: string; option_name: string;
+  app_id?: string | null; app_name?: string | null; title: string; line_items?: LineItem[]; amount_minor: number; currency: string;
+  pickup_eta_min?: number | null; duration_min?: number | null; delivery_min?: number | null; details?: Details; notice: string; simulated: boolean;
 }
-export type CatalogueApp = { id: string; name: string; service: Service; blurb: string; simulated: boolean }
-export type Proposal = { id: string; service: Service; channel: string; options: Option[]; clarification: string; summary: string; status: string; expires_at: number; input?: { message?: string; destination?: string }; appointment_id?: string }
-export type AskResult = Omit<Proposal, 'service'> & { service: Service | null; understood_by: 'keywords' | 'gemini' | 'appointment'; transcript?: string }
-export type PaymentStatus = 'not_charged_simulated' | 'pending_simulated' | 'succeeded_simulated'
-export type Payment = { method: string; status: PaymentStatus; amount: number; simulated: boolean }
+export type Quote = Offer & {
+  id: string; request_id: string; payment_method: PaymentMethod; approval: { required: boolean; reason: string }; channel: string;
+  appointment_id: string | null; status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED'; created_at: number; expires_at: number;
+}
+export type QuoteResult = { request_id: string; service_type: ServiceType; quotes: Quote[] }
+export type AskResult = {
+  id: string; service: Service | null; channel: string; status: 'quoted' | 'needs_details'; summary: string; clarification: string;
+  request_id: string | null; quotes: Quote[]; appointment_id: string | null; input?: { message?: string; destination?: string };
+  understood_by: 'keywords' | 'gemini' | 'appointment'; transcript?: string;
+}
+export type Payment = { method: PaymentMethod; status: PaymentStatus; amount_minor: number; currency: string; simulated: boolean; updated_at?: number; refund?: { status: string; at: number } | null }
 export type Decision = { action: 'approve' | 'reject'; by: string; name: string; note: string; at: number }
-export type Activity = {
-  id: string; service: Service; channel: string; option: Option; status: string; created_at: number; reference?: string; simulated?: boolean;
+export type Activity = Offer & {
+  id: string; request_id?: string; quote_id?: string; channel: string; booking_status: BookingStatus; provider_booking_id: string | null;
   payment?: Payment; shared?: boolean; approval_reason?: string; appointment_id?: string | null; decision?: Decision | null;
-  questions?: { by: string; text: string; at: number }[]; failure?: string;
+  questions?: { by: string; text: string; at: number }[]; failure?: string; created_at: number; updated_at?: number;
 }
 export type Role = 'viewer' | 'assistant' | 'approver' | 'administrator'
 export type Grant = {
@@ -66,7 +81,7 @@ export type Conversation = {
   status: string; summary: Summary; transcript?: Line[];
 }
 export type HubState = {
-  profile: Profile; role: 'owner'; storage: string; gemini?: boolean; catalogue: CatalogueApp[]; activity: Activity[]; requests: Proposal[];
+  profile: Profile; role: 'owner'; storage: string; gemini?: boolean; catalogue: CatalogueApp[]; activity: Activity[]; quotes: Quote[];
   messages: { role: string; text: string; channel: string }[]; audit: { event: string; request_id: string; at: number; actor?: string }[];
   care_circle?: Grant[]; events?: CareEvent[]; appointments?: Appointment[]; reminders?: Reminder[]; contacts?: Contact[]; conversations?: Conversation[];
   permissions?: Record<string, string>; roles?: Record<Role, string[]>; sensitive?: string[]; demo_controls?: boolean;
@@ -91,16 +106,18 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Please check the form and try again.')
   return data as T
 }
-export const statusLabel: Record<string, string> = {
-  awaiting_approval: 'Waiting for approval', simulated_confirmed: 'Booked · simulated', completed: 'Completed · simulated',
-  failed: 'Failed · nothing booked', cancelled: 'Cancelled', rejected: 'Declined in Care Circle',
-  proposed: 'Ready to review', needs_details: 'More details needed', no_booking: 'Nothing booked',
+export const bookingStatusLabel: Record<BookingStatus, string> = {
+  AWAITING_APPROVAL: 'Waiting for approval · not booked yet', CONFIRMED_SIMULATED: 'Booked · simulated', COMPLETED_SIMULATED: 'Completed · simulated',
+  FAILED: 'Failed · nothing booked', CANCELLED_SIMULATED: 'Cancelled · simulated', DECLINED: 'Declined in Care Circle',
 }
+export const statusLabel: Record<string, string> = { ...bookingStatusLabel, no_booking: 'Nothing booked' }
 export const paymentLabel: Record<PaymentStatus, string> = {
-  not_charged_simulated: 'Not charged (simulated)',
-  pending_simulated: 'Pay on completion (simulated) · nothing charged yet',
-  succeeded_simulated: 'Paid (simulated) · no real money moved',
+  NOT_CHARGED_SIMULATED: 'Not charged (simulated)',
+  PENDING_SIMULATED: 'Pending (simulated) · nothing charged yet',
+  SUCCEEDED_SIMULATED: 'Paid (simulated) · no money charged',
+  FAILED_SIMULATED: 'Failed (simulated) · nothing charged',
 }
+export const live = (item: Activity) => item.booking_status === 'AWAITING_APPROVAL' || item.booking_status === 'CONFIRMED_SIMULATED'
 export const roleLabel: Record<Role, string> = { viewer: 'Viewer', assistant: 'Assistant', approver: 'Approver', administrator: 'Administrator' }
 export const roleBlurb: Record<Role, string> = {
   viewer: 'Sees shared rides, orders and appointments.',

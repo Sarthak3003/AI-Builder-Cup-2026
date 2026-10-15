@@ -7,12 +7,12 @@ to now (India time) so the demo always has a check-up tomorrow morning.
 import time
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock
-from uuid import uuid4
 
-from app.care import NOT_CHARGED, PAID, add_event, new_grant, payment
+from app.bookings import ConfirmIn, QuoteIn, complete, confirm_quote, create_quotes
+from app.care import add_event, new_grant
 from app.domain import ONBOARDING_STEPS, SERVICE_TYPES
 from app.onboarding import PlaceIn, connect, save_place
-from app.providers import PROVIDER_IDS, food_options, medicine_options
+from app.providers import APP_IDS, ItemRequest
 
 IST = timedelta(hours=5, minutes=30)
 # Clearly fake addresses. The onboarding screen offers the same ones as quick samples.
@@ -63,9 +63,8 @@ def seed(state: dict, now: float | None = None) -> list[dict]:
         name="Meera",
         home="12 Sample Lane, Demo Nagar (sample address)",
         medicines=["BP tablet (sample)", "Vitamin D (sample)"],
-        caregiver_enabled=True,
+        caregiver_enabled=False,
         caregiver_name="Asha",
-        approval_limit=150,
     )
     seed_setup(state, now)
     state["appointments"] = [
@@ -143,46 +142,36 @@ def seed(state: dict, now: float | None = None) -> list[dict]:
         },
     ]
 
-    meal = food_options(list(PROVIDER_IDS), True, True, 200)[0]
-    meal_id = str(uuid4())
-    refill = medicine_options(list(PROVIDER_IDS), "BP tablet (sample)")[0]
-    refill_id = str(uuid4())
-    state["activity"] = [
-        {
-            "id": refill_id,
-            "service": "medicine",
-            "channel": "voice",
-            "option": refill,
-            "reference": f"SIM-{refill_id[:8].upper()}",
-            "simulated": True,
-            "status": "awaiting_approval",
-            "payment": payment(refill["price"], NOT_CHARGED),
-            "shared": True,
-            "approval_reason": "Medicine requests need approval.",
-            "appointment_id": None,
-            "decision": None,
-            "questions": [],
-            "failure": "",
-            "created_at": now - 1800,
-        },
-        {
-            "id": meal_id,
-            "service": "food",
-            "channel": "voice",
-            "option": meal,
-            "reference": f"SIM-{meal_id[:8].upper()}",
-            "simulated": True,
-            "status": "completed",
-            "payment": payment(meal["price"], PAID),
-            "shared": True,
-            "approval_reason": "",
-            "appointment_id": None,
-            "decision": None,
-            "questions": [],
-            "failure": "",
-            "created_at": now - 2 * 86400,
-        },
-    ]
+    # Bookings go through the same quote and confirmation code as the app, so they match it.
+    every_app = list(APP_IDS)
+    two_days_ago = now - 2 * 86400
+    meal_request = QuoteIn(
+        service_type="FOOD",
+        channel="voice",
+        option_id="swiggy",
+        items=[ItemRequest(item_id="khichdi")],
+    )
+    meal_quote = create_quotes(state, meal_request, every_app, now=two_days_ago)["quotes"][0]
+    yes = ConfirmIn(idempotency_key="seed-meal-0001", confirmed=True)
+    meal, _ = confirm_quote(state, meal_quote["id"], yes, every_app, now=two_days_ago)
+    complete(state, meal["id"], now=two_days_ago + 3000)
+    # From here on, Meera asks an approver about bookings above Rs 100 and every pharmacy order.
+    state["profile"].update(caregiver_enabled=True, approval_limit=100)
+    asha = new_grant(
+        "Asha",
+        "Daughter",
+        "approver",
+        ["view_summaries", "receive_alerts", "view_medication", "manage_reminders"],
+        "owner",
+    )
+    ravi = new_grant("Ravi", "Son", "viewer", [], "owner")
+    state["care_circle"] = [asha, ravi]
+    items = [ItemRequest(item_id="ors"), ItemRequest(item_id="calcium")]
+    refill_request = QuoteIn(service_type="PHARMACY", channel="voice", items=items)
+    refill_quote = create_quotes(state, refill_request, every_app, now=now - 1800)["quotes"][0]
+    yes = ConfirmIn(idempotency_key="seed-pharmacy-0001", confirmed=True)
+    refill, _ = confirm_quote(state, refill_quote["id"], yes, every_app, now=now - 1800)
+
     conversation = {"options": 0, "safety": None, "destination": "", "medicine": "", "seeded": True}
     state["conversations"] = [
         {
@@ -207,33 +196,31 @@ def seed(state: dict, now: float | None = None) -> list[dict]:
         },
         {
             **conversation,
-            "id": refill_id,
-            "request_id": refill_id,
+            "id": "conv-pharmacy",
+            "request_id": refill["request_id"],
             "channel": "voice",
             "at": now - 1800,
             "service": "medicine",
-            "medicine": "BP tablet (sample)",
             "options": 1,
             "transcript": [
-                {"role": "user", "text": "Please reorder my BP tablets."},
-                {"role": "assistant", "text": "Medicine options within ₹200"},
+                {"role": "user", "text": "Please order ORS sachets and calcium tablets."},
+                {"role": "assistant", "text": "Sample pharmacy items"},
             ],
         },
         {
             **conversation,
-            "id": meal_id,
-            "request_id": meal_id,
+            "id": "conv-meal",
+            "request_id": meal["request_id"],
             "channel": "voice",
-            "at": now - 2 * 86400,
+            "at": two_days_ago,
             "service": "food",
             "options": 3,
             "transcript": [
                 {"role": "user", "text": "I'm hungry, something light please."},
-                {"role": "assistant", "text": "Food options within ₹200"},
+                {"role": "assistant", "text": "Meals that suit you"},
             ],
         },
     ]
-    add_event(state, "completed", f"Completed (simulated): {meal['name']}", ref=meal_id)
     add_event(
         state,
         "suspected_scam",
@@ -244,22 +231,4 @@ def seed(state: dict, now: float | None = None) -> list[dict]:
         severity="attention",
         certainty="suspected",
     )
-    add_event(
-        state,
-        "approval_needed",
-        f"Approval needed: {refill['name']}",
-        "Medicine requests need approval.",
-        permission="approve",
-        ref=refill_id,
-        severity="attention",
-    )
-    asha = new_grant(
-        "Asha",
-        "Daughter",
-        "approver",
-        ["view_summaries", "receive_alerts", "view_medication", "manage_reminders"],
-        "owner",
-    )
-    ravi = new_grant("Ravi", "Son", "viewer", [], "owner")
-    state["care_circle"] = [asha, ravi]
     return [asha, ravi]

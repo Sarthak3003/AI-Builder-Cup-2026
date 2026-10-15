@@ -40,7 +40,9 @@ def test_audio_is_sent_inline_with_a_transcript_schema(monkeypatch):
     parts = payload["contents"][0]["parts"]
     assert parts[1] == {"inlineData": {"mimeType": "audio/wav", "data": "UklGRi4uLi5XQVZF"}}
     assert "transcript" in payload["generationConfig"]["responseJsonSchema"]["properties"]
-    assert "Vitamin D" in payload["systemInstruction"]["parts"][0]["text"]
+    instruction = payload["systemInstruction"]["parts"][0]["text"]
+    assert "ORS sachets, pack of 5 (sample)" in instruction
+    assert "Vitamin D" not in instruction
     assert "test-key" not in request.data.decode()
 
 

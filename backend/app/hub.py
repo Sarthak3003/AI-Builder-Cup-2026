@@ -17,16 +17,27 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validat
 
 from app.assistant import Draft, draft_request, hear_request, summarise_conversation
 from app.assistant import configured as gemini_configured
-from app.bookings import QuoteIn, active_quotes, create_quotes
+from app.bookings import (
+    ConfirmIn,
+    DecisionIn,
+    QuoteIn,
+    active_quotes,
+    cancel,
+    complete,
+    confirm_quote,
+    create_quotes,
+    decide,
+    expire_approvals,
+    find_booking,
+    settle,
+)
 from app.care import (
-    NOT_CHARGED,
-    PAID,
-    PENDING,
     PERMISSIONS,
     ROLE_NAMES,
     ROLES,
     SENSITIVE,
     active_grant,
+    activity_for_circle,
     actor_name,
     add_event,
     circle_view,
@@ -35,7 +46,6 @@ from app.care import (
     ensure,
     need,
     new_grant,
-    payment,
     permissions_for,
     reminder_view,
     summarise,
@@ -75,16 +85,21 @@ from app.onboarding import (
 )
 from app.providers import (
     APP_IDS,
-    NONE_ENABLED,
-    PROVIDER_IDS,
-    available,
-    catalogue,
-    enabled_ids,
-    food_options,
-    medicine_options,
-    ride_options,
+    MAX_LINES,
+    ItemRequest,
+    apps_catalogue,
+    enabled_apps,
+    match_products,
+    suggest_meals,
 )
 from app.seed import SAMPLE_PLACES, seed
+
+PHARMACY_ONLY = (
+    "The demo pharmacy only has sample non-prescription items, such as ORS sachets, a crepe "
+    "bandage or a thermometer. It cannot order prescription medicines."
+)
+MEDICAL_DIET = "Demo meals cannot verify medical diets or allergens."
+MEDICAL_DIET_WORDS = ("allerg", "diabet", "एलर्जी")
 
 
 class Sharing(BaseModel):
@@ -111,7 +126,7 @@ class Profile(BaseModel):
     caregiver_enabled: bool = False
     medicines: list[str] = Field(default_factory=list, max_length=10)
     enabled_providers: list[str] = Field(
-        default_factory=lambda: list(PROVIDER_IDS), max_length=len(PROVIDER_IDS)
+        default_factory=lambda: list(APP_IDS), max_length=len(APP_IDS)
     )
     sharing: Sharing = Field(default_factory=Sharing)
     channel: Literal["app", "voice", "message"] = "app"
@@ -122,23 +137,9 @@ class Profile(BaseModel):
     @field_validator("enabled_providers")
     @classmethod
     def known_unique_apps(cls, value):
-        if len(set(value)) != len(value) or any(item not in PROVIDER_IDS for item in value):
+        if len(set(value)) != len(value) or any(item not in APP_IDS for item in value):
             raise ValueError("Choose each listed app at most once.")
         return value
-
-
-class ServiceRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    id: UUID
-    service: Literal["food", "ride", "medicine"]
-    channel: Literal["app", "message", "voice"] = "app"
-    message: str = Field(default="", max_length=1000)
-    destination: str = Field(default="", max_length=150)
-    medicine: str = Field(default="", max_length=80)
-    budget: int | None = Field(default=None, ge=0, le=10000)
-    vegetarian: bool | None = None
-    mild: bool | None = None
-    appointment_id: str | None = Field(default=None, max_length=40)
 
 
 class AppointmentIn(BaseModel):
@@ -200,18 +201,6 @@ class VoiceRequest(BaseModel):
     # About 30 seconds of 16 kHz mono WAV, base64-encoded.
     audio: str = Field(min_length=64, max_length=1_400_000)
     mime_type: Literal["audio/wav"] = "audio/wav"
-
-
-class Confirm(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    option_id: str = Field(max_length=60)
-    confirmed: Literal[True]
-
-
-class Decision(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    action: Literal["approve", "reject", "ask"]
-    note: str = Field(default="", max_length=300)
 
 
 def _known_permissions(value):
@@ -334,6 +323,7 @@ def hub_router(config: Settings):
 
         def checked(state):
             ensure(state)
+            expire_approvals(state)
             if who["role"] == "caregiver":
                 grant = active_grant(state, who.get("grant", ""))
                 if not grant:
@@ -364,24 +354,23 @@ def hub_router(config: Settings):
 
     def apps(state):
         """Familiar app names the owner keeps switched on; each is still a simulated option."""
-        return [app for app in enabled_ids(state["profile"]) if app in APP_IDS]
+        return enabled_apps(state["profile"])
 
     def public(state, who):
         if who["role"] == "caregiver":
             return {
                 **circle_view(
-                    state, who["grant_record"], storage=store.mode, catalogue=catalogue()
+                    state, who["grant_record"], storage=store.mode, catalogue=apps_catalogue()
                 ),
                 **people(state, who),
             }
-        profile = {**state["profile"], "enabled_providers": enabled_ids(state["profile"])}
+        profile = {**state["profile"], "enabled_providers": apps(state)}
         return {
             **people(state, who),
             "profile": profile,
             "activity": state["activity"],
             "messages": state["messages"],
             "audit": state["audit"],
-            "requests": state["requests"],
             "care_circle": [
                 {key: value for key, value in grant.items() if key != "invite"}
                 for grant in state["care_circle"]
@@ -405,7 +394,7 @@ def hub_router(config: Settings):
             "storage": store.mode,
             "mode": "offline-demo",
             "providers": "simulated",
-            "catalogue": catalogue(),
+            "catalogue": apps_catalogue(),
             "gemini": gemini_configured(),
         }
 
@@ -597,93 +586,6 @@ def hub_router(config: Settings):
 
         return mutate(who, save, owner_only=True)
 
-    @router.post("/requests")
-    def create(body: ServiceRequest, who=actor):
-        def propose(state):
-            request_id = str(body.id)
-            payload = body.model_dump(mode="json")
-            for old in state["requests"]:
-                if old["id"] == request_id:
-                    if old["input"] != payload:
-                        raise HTTPException(409, "Use a new request ID when changing the request.")
-                    return old
-            if len(state["requests"]) >= 100:
-                raise HTTPException(409, "Demo history is full. Export it and reset this demo.")
-            profile = dict(state["profile"])
-            if body.vegetarian is not None:
-                profile["vegetarian"] = body.vegetarian
-            if body.mild is not None:
-                profile["mild"] = body.mild
-            budget = body.budget if body.budget is not None else profile["budget"]
-            enabled = enabled_ids(profile)
-            options = []
-            clarification = ""
-            message = body.message.lower()
-            appointment = None
-            if body.appointment_id:
-                appointment = next(
-                    (a for a in state["appointments"] if a["id"] == body.appointment_id), None
-                )
-                if not appointment:
-                    raise HTTPException(404, "That appointment is no longer saved.")
-            destination = body.destination or (appointment["place"] if appointment else "")
-            if any(word in message for word in EMERGENCY_WORDS):
-                clarification = EMERGENCY
-            elif looks_like_scam(body.message):
-                clarification = SCAM
-            elif not available(body.service, enabled):
-                clarification = NONE_ENABLED[body.service]
-            elif body.service == "food":
-                if any(word in message for word in ["allerg", "diabet", "एलर्जी"]):
-                    clarification = "Demo meals cannot verify medical diets or allergens."
-                else:
-                    options = food_options(enabled, profile["vegetarian"], profile["mild"], budget)
-            elif body.service == "ride":
-                if not destination:
-                    clarification = "Enter a destination before comparing demo rides."
-                else:
-                    options = ride_options(enabled, profile["home"], destination)
-            elif body.medicine not in profile["medicines"]:
-                clarification = "Choose a medicine label already saved in your profile."
-            else:
-                options = medicine_options(enabled, body.medicine)
-            options = [option for option in options if option["price"] <= budget]
-            if not options and not clarification:
-                clarification = "No demo options fit your budget. Adjust it and try again."
-            proposal = {
-                "id": request_id,
-                "input": payload,
-                "service": body.service,
-                "channel": body.channel,
-                "options": options,
-                "clarification": clarification,
-                "summary": f"{body.service.title()} options within ₹{budget}",
-                "created_at": time.time(),
-                "expires_at": time.time() + 900,
-                "status": "proposed" if options else "needs_details",
-            }
-            if appointment and body.service == "ride":
-                proposal["appointment_id"] = appointment["id"]
-                proposal["summary"] = f"Rides to {appointment['place']} for {appointment['title']}"
-            state["requests"].append(proposal)
-            remember(
-                state,
-                request_id,
-                body.channel,
-                body.message or f"Help with {body.service}",
-                clarification or proposal["summary"],
-                service=body.service,
-                request_id=request_id,
-                destination=destination if body.service == "ride" else "",
-                medicine=body.medicine if body.service == "medicine" else "",
-                options=len(options),
-                safety="suspected_scam" if clarification == SCAM else None,
-            )
-            record(state, "options_proposed", request_id)
-            return proposal
-
-        return mutate(who, propose, owner_only=True)
-
     def remember(
         state,
         conv_id,
@@ -773,71 +675,108 @@ def hub_router(config: Settings):
         state["ai_attempts"] = attempts
         return dict(state["profile"])
 
-    @router.post("/assistant")
-    def assistant(body: AssistantRequest, who=actor):
-        profile = mutate(who, ai_profile, True)
-        draft = draft_request(body.message, profile)
-        if draft.clarification:
-            return {
-                "id": str(body.id),
-                "service": draft.service,
-                "channel": body.channel,
-                "summary": "More details needed",
-                "clarification": draft.clarification,
-                "options": [],
-                "status": "needs_details",
-                "expires_at": time.time(),
-            }
-        return create(
-            ServiceRequest(
-                id=body.id,
-                message=body.message,
-                channel=body.channel,
-                **draft.model_dump(exclude={"clarification"}),
-            ),
-            who,
+    def quote_for_draft(state, draft, message, channel, appointment):
+        """Turn an understood request into quotes. A quote is never a booking."""
+        if draft.service == "ride":
+            body = QuoteIn(
+                service_type="RIDE",
+                channel=channel,
+                appointment_id=appointment["id"] if appointment else None,
+                destination_text="" if appointment else draft.destination,
+            )
+            return create_quotes(state, body, apps(state))
+        if draft.service == "food":
+            if any(word in message.lower() for word in MEDICAL_DIET_WORDS):
+                raise HTTPException(422, MEDICAL_DIET)
+            profile = state["profile"]
+            vegetarian = profile["vegetarian"] if draft.vegetarian is None else draft.vegetarian
+            mild = profile["mild"] if draft.mild is None else draft.mild
+            budget = profile["budget"] if draft.budget is None else draft.budget
+            picks = suggest_meals(apps(state), vegetarian, mild, budget * 100)
+            if not picks:
+                raise HTTPException(
+                    409, f"No demo meals fit within ₹{budget}. Try a larger budget or the menus."
+                )
+            group, quotes = None, []
+            for kitchen, dish in picks:
+                body = QuoteIn(
+                    service_type="FOOD",
+                    channel=channel,
+                    option_id=kitchen,
+                    items=[ItemRequest(item_id=dish)],
+                )
+                made = create_quotes(state, body, apps(state), group=group)
+                group = made["request_id"]
+                quotes += made["quotes"]
+            quotes.sort(key=lambda quote: (quote["amount_minor"], quote["option_id"]))
+            return {"request_id": group, "service_type": "FOOD", "quotes": quotes}
+        products = match_products(f"{message} {draft.medicine}")
+        if not products:
+            raise HTTPException(409, PHARMACY_ONLY)
+        body = QuoteIn(
+            service_type="PHARMACY",
+            channel=channel,
+            items=[ItemRequest(item_id=product) for product in products[:MAX_LINES]],
         )
+        return create_quotes(state, body, apps(state))
 
-    def routed(request_id, message, channel, draft, question, by, who, appointment=None):
+    def routed(conv_id, message, channel, draft, question, by, who, appointment=None):
         if looks_like_scam(message):
             draft, question = None, SCAM
-        if draft is None or draft.clarification:
-            reply = draft.clarification if draft else question
-            service = draft.service if draft else None
+        elif any(word in message.lower() for word in EMERGENCY_WORDS):
+            draft, question = None, EMERGENCY
+        service = draft.service if draft else None
+        destination = appointment["place"] if appointment else (draft.destination if draft else "")
 
-            def note(state):
-                remember(
-                    state,
-                    str(request_id),
-                    channel,
-                    message or "(nothing heard)",
-                    reply,
-                    service=service,
-                    safety="suspected_scam" if reply == SCAM else None,
-                )
-
-            mutate(who, note, owner_only=True)
+        def act(state):
+            made, reply = None, (draft.clarification if draft else question)
+            if draft and not draft.clarification:
+                try:
+                    made = quote_for_draft(state, draft, message, channel, appointment)
+                except HTTPException as refusal:
+                    if refusal.status_code not in {404, 409, 422}:
+                        raise
+                    reply = refusal.detail
+            quotes = made["quotes"] if made else []
+            if not quotes:
+                summary = "More details needed"
+            elif appointment:
+                summary = f"Rides to {appointment['place']} for {appointment['title']}"
+            elif service == "ride":
+                summary = f"Rides to {quotes[0]['details']['destination']['label']}"
+            elif service == "food":
+                summary = "Meals that suit you"
+            else:
+                summary = "Sample pharmacy items"
+            remember(
+                state,
+                str(conv_id),
+                channel,
+                message or "(nothing heard)",
+                reply or summary,
+                service=service,
+                request_id=made["request_id"] if made else None,
+                destination=destination if service == "ride" else "",
+                options=len(quotes),
+                safety="suspected_scam" if reply == SCAM else None,
+            )
+            record(state, "quoted" if quotes else "asked_back", str(conv_id))
             return {
-                "id": str(request_id),
+                "id": str(conv_id),
                 "service": service,
                 "channel": channel,
-                "summary": "More details needed",
-                "clarification": reply,
-                "options": [],
-                "status": "needs_details",
-                "expires_at": time.time(),
+                "status": "quoted" if quotes else "needs_details",
+                "summary": summary,
+                "clarification": "" if quotes else reply,
+                "request_id": made["request_id"] if made else None,
+                "quotes": quotes,
+                "appointment_id": appointment["id"] if appointment else None,
+                "input": {"message": message, "destination": destination},
                 "understood_by": by,
                 "transcript": message,
             }
-        fields = {"service", "destination", "medicine", "budget", "vegetarian", "mild"}
-        request = ServiceRequest(
-            id=request_id,
-            message=message,
-            channel=channel,
-            appointment_id=appointment["id"] if appointment else None,
-            **draft.model_dump(include=fields),
-        )
-        return {**create(request, who), "understood_by": by, "transcript": message}
+
+        return mutate(who, act, owner_only=True)
 
     def next_appointment(state):
         now = time.time()
@@ -848,7 +787,7 @@ def hub_router(config: Settings):
 
     @router.post("/ask")
     def ask(body: AssistantRequest, who=actor):
-        """One sentence in, a routed request out. Gemini if configured, else word matching."""
+        """One sentence in, quotes to review out. Gemini if configured, else word matching."""
         profile, appointment = mutate(
             who, lambda state: (dict(state["profile"]), next_appointment(state)), owner_only=True
         )
@@ -887,276 +826,113 @@ def hub_router(config: Settings):
             heard.clarification = "Sorry, I could not hear that. Please try again."
         return routed(body.id, transcript, "voice", heard, "", "gemini", who)
 
-    @router.post("/requests/{request_id}/confirm")
-    def confirm(request_id: UUID, body: Confirm, who=actor):
+    # --- Explicit confirmation, bookings and simulated payment ---------------------------
+
+    @router.post("/quotes/{quote_id}/confirm")
+    def confirm(quote_id: str, body: ConfirmIn, who=actor):
+        """Checks ownership, expiry, connection and approval; one booking per retry key."""
+
         def save(state):
-            rid = str(request_id)
-            existing = next((order for order in state["activity"] if order["id"] == rid), None)
-            if existing:
-                if existing["option"]["id"] != body.option_id:
-                    raise HTTPException(409, "This request already has a selected option.")
-                return existing
-            proposal = next((item for item in state["requests"] if item["id"] == rid), None)
-            if not proposal:
-                raise HTTPException(404, "Request not found.")
-            if proposal["expires_at"] < time.time():
-                raise HTTPException(409, "These options expired. Start a new request.")
-            option = next(
-                (item for item in proposal["options"] if item["id"] == body.option_id), None
-            )
-            if not option:
-                raise HTTPException(400, "Choose an offered option.")
-            p = state["profile"]
-            if option.get("provider") and option["provider"] not in enabled_ids(p):
-                raise HTTPException(
-                    409, "That app is turned off in Apps. Turn it on or start again."
-                )
-            reason = ""
-            if p["caregiver_enabled"] and proposal["service"] == "medicine":
-                reason = "Medicine requests need approval."
-            elif p["caregiver_enabled"] and option["price"] > p["approval_limit"]:
-                reason = f"Above the ₹{p['approval_limit']} approval limit."
-            failed = state["demo"].get("fail_next", False)
-            state["demo"]["fail_next"] = False
-            status = (
-                "failed" if failed else "awaiting_approval" if reason else "simulated_confirmed"
-            )
-            order = {
-                "id": rid,
-                "service": proposal["service"],
-                "channel": proposal["channel"],
-                "option": option,
-                "reference": f"SIM-{rid[:8].upper()}",
-                "simulated": True,
-                "status": status,
-                "payment": payment(
-                    option["price"], PENDING if status == "simulated_confirmed" else NOT_CHARGED
-                ),
-                "shared": p["sharing"].get(proposal["service"], True),
-                "approval_reason": reason,
-                "appointment_id": proposal.get("appointment_id"),
-                "decision": None,
-                "questions": [],
-                "failure": "Simulated provider failure: nothing was booked or charged."
-                if failed
-                else "",
-                "created_at": time.time(),
-            }
-            state["activity"].insert(0, order)
-            proposal["status"] = order["status"]
-            label = f"{option['name']} with {option.get('provider_name') or 'Saathi'}"
-            if failed:
-                add_event(
-                    state,
-                    "booking_failed",
-                    f"Booking failed: {label}",
-                    "Simulated failure. Nothing was booked or charged.",
-                    permission="receive_alerts",
-                    ref=rid,
-                    severity="attention",
-                )
-            elif reason:
-                approvers = [
-                    g
-                    for g in state["care_circle"]
-                    if g["status"] == "active" and "approve" in g["permissions"]
-                ]
-                add_event(
-                    state,
-                    "approval_needed",
-                    f"Approval needed: {label}",
-                    reason if approvers else f"{reason} No one in the Care Circle can approve yet.",
-                    permission="approve",
-                    ref=rid,
-                    severity="attention",
-                )
-            else:
-                add_event(state, "booked", f"Booked (simulated): {label}", ref=rid)
-            linked = next(
-                (a for a in state["appointments"] if a["id"] == order["appointment_id"]), None
-            )
-            if linked and not failed:
-                linked["ride_request_id"] = rid
-                waiting = status == "awaiting_approval"
-                add_event(
-                    state,
-                    "appointment_ride",
-                    f"Ride for {linked['title']} is waiting for approval"
-                    if waiting
-                    else f"Ride arranged for {linked['title']}",
-                    f"{label} to {linked['place']}. Simulated: no real driver will come.",
-                    ref=rid,
-                    topic="appointments",
-                )
-            record(state, "booking_failed" if failed else "owner_confirmed", rid)
-            return order
+            booking, created = confirm_quote(state, quote_id, body, apps(state))
+            if created:
+                failed = booking["booking_status"] == "FAILED"
+                record(state, "booking_failed" if failed else "owner_confirmed", booking["id"])
+            return booking
 
         return mutate(who, save, owner_only=True)
 
-    def find_order(state, rid):
-        order = next((item for item in state["activity"] if item["id"] == rid), None)
-        if not order:
-            raise HTTPException(404, "Activity not found.")
-        return order
+    @router.get("/bookings")
+    def bookings(who=actor):
+        return mutate(who, lambda state: state["activity"], owner_only=True)
 
-    def sync_proposal(state, rid, status):
-        for proposal in state["requests"]:
-            if proposal["id"] == rid:
-                proposal["status"] = status
+    @router.get("/bookings/{booking_id}")
+    def booking(booking_id: str, who=actor):
+        return mutate(who, lambda state: find_booking(state, booking_id), owner_only=True)
 
-    def close_approval_alerts(state, rid, by):
-        for event in state["events"]:
-            if (
-                event["ref"] == rid
-                and event["kind"] == "approval_needed"
-                and event["status"] == "open"
-            ):
-                event.update(status="resolved", resolved_by=by, resolved_at=time.time())
+    @router.post("/bookings/{booking_id}/cancel")
+    def cancel_booking(booking_id: str, who=actor):
+        def save(state):
+            booking = cancel(state, booking_id)
+            record(state, "owner_cancel", booking_id)
+            return booking
 
-    def cancel_order(state, rid):
-        order = find_order(state, rid)
-        if order["status"] == "cancelled":
-            return order
-        if order["status"] not in {"awaiting_approval", "simulated_confirmed"}:
-            raise HTTPException(409, "This activity can no longer change that way.")
-        order["status"] = "cancelled"
-        order["payment"]["status"] = NOT_CHARGED
-        sync_proposal(state, rid, "cancelled")
-        close_approval_alerts(state, rid, "owner")
-        linked = next(
-            (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
-        )
-        if linked:
-            linked["ride_request_id"] = None
-        add_event(
-            state,
-            "ride_cancelled" if linked else "cancelled",
-            f"Ride for {linked['title']} was cancelled"
-            if linked
-            else f"Cancelled: {order['option']['name']}",
-            "Cancelled by the owner. Nothing was charged.",
-            ref=rid,
-            severity="attention" if linked else "info",
-        )
-        record(state, "owner_cancel", rid)
-        return order
+        return mutate(who, save, owner_only=True)
 
-    def decide(state, rid, body, who):
-        need(who, "approve")
-        grant = who["grant_record"]
-        order = find_order(state, rid)
-        item = order["option"]["name"]
-        if body.action == "ask":
-            if order["status"] != "awaiting_approval":
-                raise HTTPException(409, "This request is no longer waiting for approval.")
-            question = body.note or "Could you tell me a little more about this request?"
-            order["questions"].append({"by": grant["name"], "text": question, "at": time.time()})
-            add_event(
-                state,
-                "question",
-                f"{grant['name']} asked about {item}",
-                question,
-                permission="approve",
-                ref=rid,
-                severity="attention",
-                actor=grant["name"],
-            )
-            record(state, "caregiver_ask", rid, grant["name"])
-            return order
-        earlier = order.get("decision")
-        if earlier:
-            if earlier["by"] == grant["id"] and earlier["action"] == body.action:
-                return order
-            done = "approved" if earlier["action"] == "approve" else "declined"
-            raise HTTPException(409, f"Already {done} by {earlier['name']}.")
-        if order["status"] != "awaiting_approval":
-            raise HTTPException(409, "This request is no longer waiting for approval.")
-        approved = body.action == "approve"
-        order["status"] = "simulated_confirmed" if approved else "rejected"
-        order["payment"]["status"] = PENDING if approved else NOT_CHARGED
-        order["decision"] = {
-            "action": body.action,
-            "by": grant["id"],
-            "name": grant["name"],
-            "note": body.note,
-            "at": time.time(),
-        }
-        sync_proposal(state, rid, order["status"])
-        close_approval_alerts(state, rid, grant["name"])
-        add_event(
-            state,
-            "approved" if approved else "declined",
-            f"{grant['name']} {'approved' if approved else 'declined'} {item}",
-            "Booking confirmed (simulated). Nothing was charged." if approved else body.note,
-            ref=rid,
-            actor=grant["name"],
-        )
-        linked = next(
-            (a for a in state["appointments"] if a["id"] == order.get("appointment_id")), None
-        )
-        if linked:
-            if not approved:
-                linked["ride_request_id"] = None
-            add_event(
-                state,
-                "appointment_ride",
-                f"Ride arranged for {linked['title']}"
-                if approved
-                else f"Ride for {linked['title']} was declined",
-                "Simulated: no real driver will come." if approved else "No ride is booked.",
-                ref=rid,
-                topic="appointments",
-                severity="info" if approved else "attention",
-            )
-        record(state, f"caregiver_{body.action}", rid, grant["name"])
-        return order
-
-    @router.post("/activity/{request_id}/cancel")
-    def cancel(request_id: UUID, who=actor):
-        return mutate(who, lambda state: cancel_order(state, str(request_id)), True)
-
-    @router.post("/activity/{request_id}/decision")
-    def decision(request_id: UUID, body: Decision, who=actor):
+    @router.post("/bookings/{booking_id}/decision")
+    def decision(booking_id: str, body: DecisionIn, who=actor):
         if who["role"] != "caregiver":
             raise HTTPException(403, "Approvals come from someone in your Care Circle.")
-        return mutate(who, lambda state: decide(state, str(request_id), body, who))
 
-    @router.put("/activity/{request_id}/sharing")
-    def share(request_id: UUID, body: ShareUpdate, who=actor):
         def save(state):
-            order = find_order(state, str(request_id))
-            order["shared"] = body.shared
-            record(state, "sharing_changed", order["id"])
-            return order
+            need(who, "approve")
+            grant = who["grant_record"]
+            booking, changed = decide(state, booking_id, body, grant)
+            if changed:
+                record(state, f"caregiver_{body.action}", booking_id, grant["name"])
+            # The approver gets their own view back, never the owner's private fields.
+            return activity_for_circle(booking, set(grant["permissions"]) | {"view_medication"})
+
+        return mutate(who, save)
+
+    @router.put("/bookings/{booking_id}/sharing")
+    def share(booking_id: str, body: ShareUpdate, who=actor):
+        def save(state):
+            booking = find_booking(state, booking_id)
+            booking["shared"] = body.shared
+            record(state, "sharing_changed", booking_id)
+            return booking
 
         return mutate(who, save, owner_only=True)
 
-    @router.post("/activity/{request_id}/complete")
-    def complete(request_id: UUID, who=actor):
-        """Demo control: the simulated trip or delivery finished and simulated payment settled."""
+    @router.post("/bookings/{booking_id}/complete")
+    def complete_booking(booking_id: str, who=actor):
+        """Demo control: the simulated trip or delivery finished. Payment is unchanged."""
         if not demo_controls:
             raise HTTPException(404, "Not available.")
 
-        def finish(state):
-            order = find_order(state, str(request_id))
-            if order["status"] == "completed":
-                return order
-            if order["status"] != "simulated_confirmed":
-                raise HTTPException(409, "Only a confirmed booking can be completed.")
-            order["status"] = "completed"
-            order["payment"]["status"] = PAID
-            sync_proposal(state, order["id"], "completed")
-            add_event(
-                state,
-                "completed",
-                f"Completed (simulated): {order['option']['name']}",
-                "Simulated payment settled. No real money moved.",
-                ref=order["id"],
-            )
-            record(state, "demo_completed", order["id"])
-            return order
+        def save(state):
+            booking = complete(state, booking_id)
+            record(state, "demo_completed", booking_id)
+            return booking
 
-        return mutate(who, finish, owner_only=True)
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/bookings/{booking_id}/payment/complete")
+    def settle_payment(booking_id: str, who=actor):
+        """Demo control: mark a pay-on-completion simulated payment as paid."""
+        if not demo_controls:
+            raise HTTPException(404, "Not available.")
+
+        def save(state):
+            booking = settle(state, booking_id)
+            record(state, "demo_payment_completed", booking_id)
+            return booking
+
+        return mutate(who, save, owner_only=True)
+
+    # --- One activity timeline: the owner sees all of it, a caretaker only what is shared --
+
+    @router.get("/activities")
+    def activities(who=actor):
+        def read(state):
+            if who["role"] == "owner":
+                return state["events"]
+            return visible_events(state, set(who["grant_record"]["permissions"]))
+
+        return mutate(who, read)
+
+    @router.get("/care-circle/activities")
+    def circle_activities(who=actor):
+        if who["role"] != "caregiver":
+            raise HTTPException(403, "This list is for people in a Care Circle.")
+
+        def read(state):
+            view = circle_view(
+                state, who["grant_record"], storage=store.mode, catalogue=apps_catalogue()
+            )
+            return {"events": view["events"], "bookings": view["activity"]}
+
+        return mutate(who, read)
 
     def find(collection, item_id, what):
         item = next((entry for entry in collection if entry["id"] == item_id), None)

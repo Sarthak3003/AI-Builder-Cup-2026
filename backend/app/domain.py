@@ -38,6 +38,8 @@ PROVIDER_TYPE: dict[str, ProviderType] = {
 }
 
 CURRENCY = "INR"
+# Version of the stored account document; older demo data is cleared rather than migrated.
+SCHEMA = 2
 QUOTE_TTL_SECONDS = 15 * 60
 APPROVAL_TTL_SECONDS = 24 * 3600
 

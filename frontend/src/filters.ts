@@ -1,21 +1,21 @@
-import type { Activity, Service } from './hub'
+import type { Activity, BookingStatus, Service } from './hub'
 
 export type Filters = { service: Service | 'all'; status: 'all' | 'pending' | 'confirmed' | 'completed' | 'failed' | 'cancelled'; range: 'all' | 'today' | 'week' }
 export const noFilters: Filters = { service: 'all', status: 'all', range: 'all' }
 
-const groups: Record<Exclude<Filters['status'], 'all'>, string[]> = {
-  pending: ['awaiting_approval'],
-  confirmed: ['simulated_confirmed'],
-  completed: ['completed'],
-  failed: ['failed'],
-  cancelled: ['cancelled', 'rejected'],
+const groups: Record<Exclude<Filters['status'], 'all'>, BookingStatus[]> = {
+  pending: ['AWAITING_APPROVAL'],
+  confirmed: ['CONFIRMED_SIMULATED'],
+  completed: ['COMPLETED_SIMULATED'],
+  failed: ['FAILED'],
+  cancelled: ['CANCELLED_SIMULATED', 'DECLINED'],
 }
 
 export function applyFilters(items: Activity[], filters: Filters, now = Date.now()): Activity[] {
   const since = filters.range === 'today' ? new Date(now).setHours(0, 0, 0, 0) : filters.range === 'week' ? now - 7 * 86_400_000 : 0
   return items.filter((item) =>
     (filters.service === 'all' || item.service === filters.service) &&
-    (filters.status === 'all' || groups[filters.status].includes(item.status)) &&
+    (filters.status === 'all' || groups[filters.status].includes(item.booking_status)) &&
     item.created_at * 1000 >= since)
 }
 

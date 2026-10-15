@@ -218,9 +218,9 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .activity-title h3 { font-size: 1.0625em; }
 .activity-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .status { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 0.8125em; font-weight: 700; background: var(--surface-2); color: var(--text); }
-.status.simulated_confirmed { background: var(--green-tint); color: var(--green-strong); }
+.status.confirmed_simulated { background: var(--green-tint); color: var(--green-strong); }
 .status.awaiting_approval { background: var(--yellow-tint); color: var(--yellow-ink); }
-.status.cancelled, .status.rejected { background: var(--red-tint); color: var(--red-strong); }
+.status.cancelled_simulated, .status.declined { background: var(--red-tint); color: var(--red-strong); }
 .empty { align-items: flex-start; }
 .audit { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 0 16px 8px; }
 .audit ul { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; color: var(--text-2); font-size: 0.875em; }
@@ -262,6 +262,20 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .review-list dt { grid-column: 1; color: var(--text-2); font-weight: 600; }
 .review-list dd { grid-column: 1; }
 .review-list a { grid-column: 2; grid-row: 1 / span 2; align-self: center; min-height: 44px; display: inline-flex; align-items: center; font-weight: 600; }
+
+/* ---------- Quotes and bookings ---------- */
+.menu-list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.menu-row > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.stepper-control { display: inline-flex; align-items: center; gap: 8px; }
+.stepper-control button { min-width: 44px; min-height: 44px; font-size: 1.25em; padding: 0; }
+.stepper-control output { min-width: 1.5em; text-align: center; font-weight: 700; }
+.price-lines { width: 100%; border-top: 1px solid var(--line); }
+.price-lines div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.price-lines dt { color: var(--text-2); }
+.price-lines .total dt, .price-lines .total dd { font-weight: 700; color: var(--text); }
+.simulation-warning { padding: 12px 14px; border-radius: var(--radius); background: var(--yellow-tint); color: var(--yellow-ink); font-weight: 700; }
+.codes code { font-size: 0.875em; overflow-wrap: anywhere; }
 .switch {
   position: relative; flex: none; width: 60px; height: 36px; padding: 0; border-radius: 999px;
   border: 2px solid var(--control-line); background: var(--surface-2);
@@ -314,10 +328,10 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .person-role { font-size: 0.8125em; }
 .status-chips { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .status-chips .status, .status-chips .pay { display: inline-flex; padding: 3px 10px; border-radius: 999px; font-size: 0.8125em; font-weight: 600; background: var(--surface-2); color: var(--text-2); }
-.status.simulated_confirmed, .status.completed { background: var(--green-tint); color: var(--green-strong); }
+.status.confirmed_simulated, .status.completed_simulated { background: var(--green-tint); color: var(--green-strong); }
 .status.awaiting_approval { background: var(--yellow-tint); color: var(--yellow-ink); }
-.status.failed, .status.rejected { background: var(--red-tint); color: var(--red-strong); }
-.pay.pending_simulated, .pay.succeeded_simulated { background: var(--blue-tint); color: var(--blue-ink); }
+.status.failed, .status.declined { background: var(--red-tint); color: var(--red-strong); }
+.pay.pending_simulated, .pay.succeeded_simulated, .pay.refunded { background: var(--blue-tint); color: var(--blue-ink); }
 .activity.failed { border-color: var(--red-strong); }
 .activity-meta { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border: 0; padding: 0; margin: 0; }

@@ -10,11 +10,13 @@ from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
 from app.config import Settings
+from app.domain import SCHEMA
 from app.onboarding import PROFILE_DEFAULTS, new_setup
 
 
 def initial_state():
     return {
+        "schema": SCHEMA,
         **new_setup(),
         "profile": {
             **PROFILE_DEFAULTS,
@@ -26,18 +28,16 @@ def initial_state():
             "vegetarian": True,
             "mild": True,
             "budget": 200,
-            "home": "Demo home",
+            "home": "",
             "caregiver_name": "",
             "approval_limit": 150,
             "caregiver_enabled": False,
-            "medicines": ["Saved medicine A"],
+            # Saved labels for reminders only; the demo pharmacy never orders them.
+            "medicines": [],
         },
-        "requests": [],
         "activity": [],
         "messages": [],
         "audit": [],
-        "caregiver_version": 0,
-        "invite": None,
     }
 
 

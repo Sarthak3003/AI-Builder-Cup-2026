@@ -19,11 +19,11 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
   const appsLine = (service: Service) => {
     const connection = state.services?.find((item) => item.service_type === serviceTypeOf[service])
     if (connection && connection.status !== 'CONNECTED') return `Setup required: connect the ${connection.provider_label}`
-    if (service === 'medicine') return 'From your saved medicine list'
+    if (service === 'medicine') return 'Sample non-prescription items (demo)'
     const names = state.catalogue.filter((app) => app.service === service && state.profile.enabled_providers.includes(app.id)).map((app) => app.name)
     return names.length ? `${names.join(' · ')} (demo)` : 'Turn on an option in Services first'
   }
-  const unfinished = [...state.requests].reverse().find((item) => item.status === 'proposed' && item.expires_at * 1000 > now)
+  const unfinished = (state.quotes ?? []).filter((quote) => quote.status === 'ACTIVE' && quote.expires_at * 1000 > now).at(-1)
   const flow = state.onboarding
   const next = flow?.steps.find((step) => step.id === flow.current)
   const done = flow?.steps.filter((step) => step.status !== null).length ?? 0
@@ -68,7 +68,7 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
       </section>
 
       {unfinished ? (
-        <a className="secondary wide" href={`#/request/${unfinished.service}`}>Continue your unfinished {unfinished.service} request</a>
+        <a className="secondary wide" href={`#/request/${unfinished.service}/${unfinished.request_id}`}>Continue your unfinished {serviceNames[unfinished.service].toLowerCase()} request</a>
       ) : null}
 
       <section className="card demo-note" aria-labelledby="demo-title">

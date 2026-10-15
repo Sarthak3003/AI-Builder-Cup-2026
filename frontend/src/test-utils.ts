@@ -1,14 +1,13 @@
 import { vi } from 'vitest'
-import type { CareState, CatalogueApp, ConnectionStatus, DemoService, HubState, Place, Progress, StepId } from './hub'
+import type { Activity, BookingStatus, CareState, CatalogueApp, ConnectionStatus, DemoService, HubState, PaymentStatus, Place, Progress, Quote, StepId } from './hub'
 
 export const catalogue: CatalogueApp[] = [
-  { id: 'uber', name: 'Uber', service: 'ride', blurb: 'Cabs', simulated: true },
-  { id: 'ola', name: 'Ola', service: 'ride', blurb: 'Cabs', simulated: true },
-  { id: 'rapido', name: 'Rapido', service: 'ride', blurb: 'Autos and bikes', simulated: true },
-  { id: 'ubereats', name: 'Uber Eats', service: 'food', blurb: 'Meals delivered to your door', simulated: true },
-  { id: 'swiggy', name: 'Swiggy', service: 'food', blurb: 'Meals delivered to your door', simulated: true },
-  { id: 'zomato', name: 'Zomato', service: 'food', blurb: 'Meals delivered to your door', simulated: true },
-  { id: 'pharmacy', name: 'Demo pharmacy', service: 'medicine', blurb: 'Medicines saved in your profile', simulated: true },
+  { id: 'uber', name: 'Uber', service: 'ride', service_type: 'RIDE', simulated: true },
+  { id: 'ola', name: 'Ola', service: 'ride', service_type: 'RIDE', simulated: true },
+  { id: 'rapido', name: 'Rapido', service: 'ride', service_type: 'RIDE', simulated: true },
+  { id: 'ubereats', name: 'Uber Eats', service: 'food', service_type: 'FOOD', simulated: true },
+  { id: 'swiggy', name: 'Swiggy', service: 'food', service_type: 'FOOD', simulated: true },
+  { id: 'zomato', name: 'Zomato', service: 'food', service_type: 'FOOD', simulated: true },
 ]
 
 export function makeState(overrides: Partial<HubState> = {}): HubState {
@@ -18,7 +17,7 @@ export function makeState(overrides: Partial<HubState> = {}): HubState {
       home: 'Demo home', caregiver_name: '', approval_limit: 150, caregiver_enabled: false, medicines: ['Saved medicine A'],
       enabled_providers: catalogue.map((app) => app.id), channel: 'app', read_aloud: false, offer_help: true, payment_method: 'DEMO_WALLET',
     },
-    role: 'owner', storage: 'local-sqlite', catalogue, activity: [], requests: [], messages: [], audit: [],
+    role: 'owner', storage: 'local-sqlite', catalogue, activity: [], quotes: [], messages: [], audit: [],
     care_circle: [], events: [], appointments: [], reminders: [], contacts: [], conversations: [],
     permissions: permissionLabels, sensitive: ['manage_contacts', 'view_medication', 'view_payments', 'view_transcripts'], demo_controls: false,
     roles: { viewer: ['view_activity'], assistant: ['view_activity', 'manage_reminders', 'edit_profile'], approver: ['view_activity', 'approve'], administrator: ['view_activity', 'manage_circle'] },
@@ -85,8 +84,56 @@ export function demoServices(status: ConnectionStatus = 'CONNECTED'): DemoServic
   ]
 }
 
-export const swiggyMeal = { id: 'swiggy-khichdi', provider: 'swiggy', provider_name: 'Swiggy', name: 'Vegetable khichdi', price: 110, eta_min: 25, simulated: true, detail: 'From Demo Home Kitchen · Vegetarian, mild · Price includes delivery' }
-export const uberRide = { id: 'uber-go', provider: 'uber', provider_name: 'Uber', name: 'Uber Go', price: 180, eta_min: 6, simulated: true, detail: 'Demo home to Clinic · Sample fare' }
+const nowSeconds = () => Date.now() / 1000
+const home = { label: 'Home', address: '12 Sample Lane, Demo Nagar (sample address)', place_id: 'place-home' }
+const doctor = { label: 'Doctor', address: 'Sunrise Clinic, 4 Example Road (sample address)', place_id: 'place-doctor' }
+
+export function rideQuote(overrides: Partial<Quote> = {}): Quote {
+  return {
+    id: 'q-uber', request_id: 'r-1', service: 'ride', service_type: 'RIDE', provider_type: 'DEMO_RIDE', provider_label: 'Demo Ride Provider',
+    option_id: 'uber-go', option_name: 'Uber Go', app_id: 'uber', app_name: 'Uber', title: 'Uber Go to Doctor',
+    line_items: [{ label: 'Base fare', amount_minor: 5000 }, { label: 'Distance, 5.3 km at ₹16/km', amount_minor: 8500 }],
+    amount_minor: 13500, currency: 'INR', pickup_eta_min: 6, duration_min: 21, delivery_min: null,
+    details: { pickup: home, destination: doctor, distance_km: 5.3 }, notice: 'Demo ride — no real driver will arrive.', simulated: true,
+    payment_method: 'DEMO_WALLET', approval: { required: false, reason: '' }, channel: 'app', appointment_id: null, status: 'ACTIVE',
+    created_at: nowSeconds(), expires_at: nowSeconds() + 900, ...overrides,
+  }
+}
+export const rapidoQuote = () => rideQuote({
+  id: 'q-rapido', option_id: 'rapido-auto', option_name: 'Rapido Auto', app_id: 'rapido', app_name: 'Rapido', title: 'Rapido Auto to Doctor',
+  line_items: [{ label: 'Base fare', amount_minor: 2500 }, { label: 'Distance, 5.3 km at ₹11/km', amount_minor: 5800 }], amount_minor: 8300, pickup_eta_min: 3,
+})
+export const olaQuote = () => rideQuote({
+  id: 'q-ola', option_id: 'ola-mini', option_name: 'Ola Mini', app_id: 'ola', app_name: 'Ola', title: 'Ola Mini to Doctor',
+  line_items: [{ label: 'Base fare', amount_minor: 4500 }, { label: 'Distance, 5.3 km at ₹15/km', amount_minor: 8000 }], amount_minor: 12500, pickup_eta_min: 5,
+})
+export function mealQuote(overrides: Partial<Quote> = {}): Quote {
+  return rideQuote({
+    id: 'q-meal', request_id: 'r-2', service: 'food', service_type: 'FOOD', provider_type: 'DEMO_FOOD', provider_label: 'Demo Food Provider',
+    option_id: 'swiggy', option_name: 'Demo Home Kitchen', app_id: 'swiggy', app_name: 'Swiggy', title: 'Vegetable khichdi from Demo Home Kitchen',
+    line_items: [{ label: 'Vegetable khichdi × 1', amount_minor: 8500 }, { label: 'Delivery fee (demo)', amount_minor: 2500 }], amount_minor: 11000,
+    pickup_eta_min: null, duration_min: null, delivery_min: 25, notice: 'Demo order — no real food will be delivered.',
+    details: { kitchen: 'Demo Home Kitchen', items: [{ item_id: 'khichdi', name: 'Vegetable khichdi', quantity: 1, unit_minor: 8500, vegetarian: true, mild: true }] },
+    ...overrides,
+  })
+}
+
+// A booking made from a quote, with the payment the backend would record for that status.
+export function booking(quote: Quote, status: BookingStatus = 'CONFIRMED_SIMULATED', overrides: Partial<Activity> = {}): Activity {
+  const made = status === 'CONFIRMED_SIMULATED' || status === 'COMPLETED_SIMULATED'
+  const paid: PaymentStatus = made ? (quote.payment_method === 'DEMO_WALLET' ? 'SUCCEEDED_SIMULATED' : 'PENDING_SIMULATED') : 'NOT_CHARGED_SIMULATED'
+  return {
+    service: quote.service, service_type: quote.service_type, provider_type: quote.provider_type, provider_label: quote.provider_label,
+    option_id: quote.option_id, option_name: quote.option_name, app_id: quote.app_id, app_name: quote.app_name, title: quote.title,
+    line_items: quote.line_items, amount_minor: quote.amount_minor, currency: 'INR', pickup_eta_min: quote.pickup_eta_min,
+    duration_min: quote.duration_min, delivery_min: quote.delivery_min, details: quote.details, notice: quote.notice, simulated: true,
+    id: `b-${quote.option_id}-${status.toLowerCase()}`, quote_id: quote.id, request_id: quote.request_id, channel: 'app', booking_status: status,
+    provider_booking_id: made ? `${quote.service_type === 'RIDE' ? 'DEMO-RIDE' : 'DEMO-FOOD'}-1042` : null,
+    payment: { method: quote.payment_method, status: paid, amount_minor: quote.amount_minor, currency: 'INR', simulated: true, refund: null },
+    shared: true, approval_reason: '', appointment_id: quote.appointment_id, decision: null, questions: [], failure: '',
+    created_at: nowSeconds() - 60, ...overrides,
+  }
+}
 
 export const permissionLabels: Record<string, string> = {
   view_activity: 'See shared rides, orders and appointments', manage_reminders: 'Add and change reminders and appointments',

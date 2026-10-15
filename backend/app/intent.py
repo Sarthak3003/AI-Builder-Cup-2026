@@ -7,6 +7,7 @@ Nothing here books anything; it only drafts a request the user still reviews.
 import re
 
 from app.assistant import Draft
+from app.providers import PRODUCTS
 
 EMERGENCY_WORDS = ("emergency", "chest pain", "can't breathe", "cannot breathe", "आपातकाल")
 EMERGENCY = (
@@ -130,6 +131,7 @@ KEYWORDS = {
         "chemist",
         "refill",
         "prescription",
+        *(word for product in PRODUCTS for word in product.keywords),
         "दवा",
         "दवाई",
         "दवाइयाँ",
@@ -205,15 +207,13 @@ def understand(message: str, profile: dict) -> tuple[Draft | None, str]:
     if any(word in text for word in EMERGENCY_WORDS):
         return None, EMERGENCY
 
-    saved = profile.get("medicines", [])
-    named = [label for label in saved if label.lower() in text]
     without_food_apps = text
     for app in FOOD_APPS:
         without_food_apps = without_food_apps.replace(app, " ")
     scores = {
         "ride": _score(without_food_apps, KEYWORDS["ride"]),
         "food": _score(text, KEYWORDS["food"]),
-        "medicine": _score(text, KEYWORDS["medicine"]) + len(named),
+        "medicine": _score(text, KEYWORDS["medicine"]),
     }
     best = max(scores.values())
     if best == 0:
@@ -235,12 +235,5 @@ def understand(message: str, profile: dict) -> tuple[Draft | None, str]:
     if service == "food":
         vegetarian, mild = _diet(text)
         return Draft(service="food", budget=limit, vegetarian=vegetarian, mild=mild), ""
-    if len(named) == 1:
-        return Draft(service="medicine", medicine=named[0], budget=limit), ""
-    if not named and len(saved) == 1:
-        return Draft(service="medicine", medicine=saved[0], budget=limit), ""
-    if not saved:
-        question = "Add your medicine's name in Profile first, then ask again."
-    else:
-        question = "Which medicine? Your saved list: " + ", ".join(saved) + "."
-    return Draft(service="medicine", clarification=question[:300]), ""
+    # The server matches the words against the sample pharmacy catalogue, never a prescription.
+    return Draft(service="medicine", medicine=message[:80], budget=limit), ""

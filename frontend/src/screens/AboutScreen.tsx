@@ -27,19 +27,20 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
       <section className="card">
         <h2>What you can try</h2>
         <ul className="plain-list">
-          <li>Ask for a ride or a meal, by typing or speaking, instead of calling family.</li>
-          <li>Compare demo apps: Uber, Ola and Rapido for rides; Uber Eats, Swiggy and Zomato for food.</li>
-          <li>Review and confirm. Saathi books only after your OK and saves a reference in Activity.</li>
-          <li>Turn apps on or off in Apps. Saathi only compares the ones you keep on.</li>
-          <li>Invite a family caregiver who can approve larger requests. They cannot book for you.</li>
+          <li>Set up Saathi once: your name, comfort settings, saved places, Care Circle, demo services and how simulated payments work.</li>
+          <li>Ask for a ride, a meal or everyday pharmacy items, by typing or speaking, instead of calling family.</li>
+          <li>See a server price with every line explained, then confirm. Saathi books only after your clear yes.</li>
+          <li>Compare demo options shown under familiar names: Uber, Ola and Rapido for rides; Uber Eats, Swiggy and Zomato for food.</li>
+          <li>Invite a family member who can see shared activity, or also approve larger bookings. They cannot book or pay for you.</li>
           <li>Larger text, high contrast, read aloud, Hindi labels, and install on your home screen.</li>
         </ul>
       </section>
 
       <section className="card demo-note">
         <h2>What is simulated</h2>
-        <p>Every app, price, delivery time and booking here is simulated. No Uber, Ola, Rapido, Uber Eats, Swiggy or Zomato account is used, nothing is charged, and the names are only examples with no link to those companies.</p>
-        <p>Real connections need each company&rsquo;s approval and your own sign-in, so they are not built yet.</p>
+        <p>Every booking is made by one of Saathi&rsquo;s demo providers: the Demo Ride Provider, the Demo Food Provider or the Demo Pharmacy Provider. Prices, times and booking references such as DEMO-RIDE-1042 are samples. No driver comes, no food or medicine is delivered and no money moves.</p>
+        <p>Names such as Uber or Swiggy are only labels on demo options. No account with those companies is used and Saathi has no link to them. The demo pharmacy has sample non-prescription items only.</p>
+        <p>Saathi never asks for card numbers, UPI PINs, OTPs or bank logins.</p>
       </section>
 
       <section className="card">

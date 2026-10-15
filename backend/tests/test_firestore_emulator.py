@@ -67,7 +67,8 @@ def test_food_flow_with_real_firestore(monkeypatch):
 
 @pytest.mark.emulator
 def test_hub_services_and_caregiver_with_firestore(tmp_path, monkeypatch):
-    from test_hub import confirm, enable_care, propose
+    from booking_helpers import book, ready
+    from test_hub import enable_care
 
     if os.environ.get("SAATHI_RUN_EMULATOR_TESTS") != "1":
         pytest.skip("Requires local Firestore emulator")
@@ -75,26 +76,21 @@ def test_hub_services_and_caregiver_with_firestore(tmp_path, monkeypatch):
     application = create_app(Settings(environment="test", firestore_mode="emulator"))
     with TestClient(application) as owner, TestClient(application) as caregiver:
         assert owner.post("/api/hub/session").json()["storage"] == "firestore-emulator"
+        ready(owner)
         code = enable_care(owner)
         assert caregiver.post("/api/hub/caregiver/join", json={"code": code}).status_code == 200
-        for service, extra in [
-            ("food", {}),
-            ("ride", {"destination": "Park"}),
-            ("medicine", {"medicine": "Saved medicine A"}),
-        ]:
-            proposal = propose(owner, service, **extra)
-            result = confirm(owner, proposal)
-            assert result.status_code == 200, result.text
-            if result.json()["status"] == "awaiting_approval":
+        for service in ("food", "ride", "medicine"):
+            booked = book(owner, service)
+            if booked["booking_status"] == "AWAITING_APPROVAL":
                 assert (
                     caregiver.post(
-                        f"/api/hub/activity/{proposal['id']}/decision", json={"action": "approve"}
+                        f"/api/hub/bookings/{booked['id']}/decision", json={"action": "approve"}
                     ).status_code
                     == 200
                 )
         activity = owner.get("/api/hub/state").json()["activity"]
         assert len(activity) == 3
-        assert all(item["status"] == "simulated_confirmed" for item in activity)
+        assert all(item["booking_status"] == "CONFIRMED_SIMULATED" for item in activity)
         owner.delete("/api/hub/caregiver")
         assert caregiver.get("/api/hub/state").status_code == 403
         owner.delete("/api/hub/data")

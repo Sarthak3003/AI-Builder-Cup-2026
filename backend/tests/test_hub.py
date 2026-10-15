@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
+from booking_helpers import book, confirm, ok, quotes, ready
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -20,21 +21,8 @@ def app(tmp_path, monkeypatch):
 def client(app):
     with TestClient(app) as api:
         assert api.post("/api/hub/session").status_code == 200
+        ready(api)
         yield api
-
-
-def propose(client, service="food", **kwargs):
-    body = {"id": str(uuid4()), "service": service, **kwargs}
-    result = client.post("/api/hub/requests", json=body)
-    assert result.status_code == 200, result.text
-    return result.json()
-
-
-def confirm(client, proposal, option=None):
-    return client.post(
-        f"/api/hub/requests/{proposal['id']}/confirm",
-        json={"option_id": option or proposal["options"][0]["id"], "confirmed": True},
-    )
 
 
 def enable_care(client):
@@ -44,103 +32,104 @@ def enable_care(client):
     return client.post("/api/hub/caregiver/invite").json()["code"]
 
 
-@pytest.mark.parametrize(
-    "service,extra",
-    [
-        ("food", {}),
-        ("ride", {"destination": "Community centre"}),
-        ("medicine", {"medicine": "Saved medicine A"}),
-    ],
-)
-def test_all_services_persist_and_cancel(client, service, extra):
-    proposal = propose(client, service, **extra)
-    result = confirm(client, proposal)
-    assert result.status_code == 200
-    assert result.json()["status"] == "simulated_confirmed"
-    assert client.get("/api/hub/state").json()["activity"][0] == result.json()
-    assert confirm(client, proposal).json() == result.json()
-    path = f"/api/hub/activity/{proposal['id']}/cancel"
-    assert client.post(path).json()["status"] == "cancelled"
-    assert client.post(path).json()["status"] == "cancelled"
-    assert confirm(client, proposal).json()["status"] == "cancelled"
+@pytest.mark.parametrize("service", ["food", "ride", "medicine"])
+def test_all_services_persist_and_cancel(client, service):
+    quote = quotes(client, service)[0]
+    key = str(uuid4())
+    result = ok(confirm(client, quote, key))
+    assert result["booking_status"] == "CONFIRMED_SIMULATED"
+    assert client.get("/api/hub/state").json()["activity"][0] == result
+    assert ok(confirm(client, quote, key)) == result
+    path = f"/api/hub/bookings/{result['id']}/cancel"
+    assert ok(client.post(path))["booking_status"] == "CANCELLED_SIMULATED"
+    assert ok(client.post(path))["booking_status"] == "CANCELLED_SIMULATED"
+    assert ok(confirm(client, quote, key))["booking_status"] == "CANCELLED_SIMULATED"
+    assert confirm(client, quote).status_code == 409
 
 
 def test_caregiver_permissions_and_revocation(app, client):
     code = enable_care(client)
-    proposal = propose(client)
-    assert confirm(client, proposal).json()["status"] == "awaiting_approval"
-    decision = f"/api/hub/activity/{proposal['id']}/decision"
+    pending = book(client, "medicine")
+    assert pending["booking_status"] == "AWAITING_APPROVAL"
+    decision = f"/api/hub/bookings/{pending['id']}/decision"
     assert client.post(decision, json={"action": "approve"}).status_code == 403
     with TestClient(app) as caregiver:
-        assert (
-            caregiver.post("/api/hub/caregiver/join", json={"code": code}).json()["role"]
-            == "caregiver"
-        )
+        joined = caregiver.post("/api/hub/caregiver/join", json={"code": code})
+        assert joined.json()["role"] == "caregiver"
         assert caregiver.post("/api/hub/caregiver/join", json={"code": code}).status_code == 403
-        assert (
-            caregiver.post(
-                "/api/hub/requests", json={"id": str(uuid4()), "service": "food"}
-            ).status_code
-            == 403
-        )
+        ride = {"service_type": "RIDE", "destination_text": "Park"}
+        assert caregiver.post("/api/hub/quotes", json=ride).status_code == 403
         assert caregiver.delete("/api/hub/data").status_code == 403
-        assert (
-            caregiver.post(decision, json={"action": "approve"}).json()["status"]
-            == "simulated_confirmed"
-        )
+        approved = ok(caregiver.post(decision, json={"action": "approve"}))
+        assert approved["booking_status"] == "CONFIRMED_SIMULATED"
         assert caregiver.post(decision, json={"action": "reject"}).status_code == 409
         client.delete("/api/hub/caregiver")
         assert caregiver.get("/api/hub/state").status_code == 403
 
 
-def test_other_owner_cannot_access_request(app, client):
-    proposal = propose(client)
+def test_other_owner_cannot_see_or_confirm_a_quote(app, client):
+    quote = quotes(client)[0]
+    booked = book(client)
     with TestClient(app) as other:
         other.post("/api/hub/session")
-        assert confirm(other, proposal).status_code == 404
+        assert confirm(other, quote).status_code == 404
+        assert other.get(f"/api/hub/bookings/{booked['id']}").status_code == 404
+        assert other.post(f"/api/hub/bookings/{booked['id']}/cancel").status_code == 404
         assert other.get("/api/hub/state").json()["activity"] == []
+    assert ok(confirm(client, quote))["booking_status"] == "CONFIRMED_SIMULATED"
 
 
-def test_confirmation_cannot_invent_prices_or_options(client):
-    proposal = propose(client)
-    assert confirm(client, proposal, "fake").status_code == 400
-    path = f"/api/hub/requests/{proposal['id']}/confirm"
-    assert client.post(path, json={"option_id": "dal", "confirmed": False}).status_code == 422
+def test_confirmation_cannot_send_prices_or_skip_the_explicit_yes(client):
+    quote = quotes(client)[0]
+    path = f"/api/hub/quotes/{quote['id']}/confirm"
+    key = str(uuid4())
+    for body in (
+        {"idempotency_key": key, "confirmed": False},
+        {"idempotency_key": key},
+        {"confirmed": True},
+        {"idempotency_key": key, "confirmed": True, "amount_minor": 1},
+        {"idempotency_key": key, "confirmed": True, "booking_status": "CONFIRMED_SIMULATED"},
+        {"idempotency_key": "bad key!", "confirmed": True},
+    ):
+        assert client.post(path, json=body).status_code == 422, body
     assert (
-        client.post(path, json={"option_id": "dal", "confirmed": True, "price": 1}).status_code
-        == 422
+        client.post(
+            "/api/hub/quotes/nope/confirm", json={"idempotency_key": key, "confirmed": True}
+        ).status_code
+        == 404
     )
+    assert client.get("/api/hub/state").json()["activity"] == []
 
 
-def test_request_idempotency_and_conflict(client):
-    body = {"id": str(uuid4()), "service": "food"}
-    first = client.post("/api/hub/requests", json=body).json()
-    assert client.post("/api/hub/requests", json=body).json() == first
-    assert client.post("/api/hub/requests", json={**body, "budget": 20}).status_code == 409
-    assert len(client.get("/api/hub/state").json()["requests"]) == 1
+def test_a_retry_key_belongs_to_one_quote(client):
+    first, second = quotes(client)[:2]
+    key = str(uuid4())
+    booked = ok(confirm(client, first, key))
+    assert ok(confirm(client, first, key)) == booked
+    reused = confirm(client, second, key)
+    assert reused.status_code == 409 and "another booking" in reused.json()["detail"]
+    assert len(client.get("/api/hub/state").json()["activity"]) == 1
 
 
-def test_parallel_confirmations_only_create_one(app, client):
-    proposal = propose(client)
+@pytest.mark.parametrize("same_key", [True, False])
+def test_parallel_confirmations_only_create_one_booking_and_payment(app, client, same_key):
+    quote = quotes(client)[0]
     cookie = client.cookies.get("__session")
+    shared = str(uuid4())
 
     def send(_):
         with TestClient(app) as api:
             api.cookies.set("__session", cookie)
-            return confirm(api, proposal)
+            return confirm(api, quote, shared if same_key else None)
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(send, range(4)))
-    assert all(result.status_code == 200 for result in results)
-    assert len(client.get("/api/hub/state").json()["activity"]) == 1
-
-
-def test_clarifications_and_budget(client):
-    assert propose(client, budget=1)["options"] == []
-    assert propose(client, "ride")["options"] == []
-    assert propose(client, "medicine", medicine="unknown")["options"] == []
-    assert propose(client, message="chest pain emergency")["options"] == []
-    assert propose(client, message="peanut allergy")["options"] == []
+    codes = sorted(result.status_code for result in results)
+    assert codes == ([200] * 4 if same_key else [200, 409, 409, 409])
+    activity = client.get("/api/hub/state").json()["activity"]
+    assert len(activity) == 1 and activity[0]["provider_booking_id"] == "DEMO-RIDE-1042"
+    ledger = [r.json()["id"] for r in results if r.status_code == 200]
+    assert set(ledger) == {activity[0]["id"]}
 
 
 def ask(client, message, channel="voice"):
@@ -151,33 +140,54 @@ def ask(client, message, channel="voice"):
     return result.json()
 
 
-def test_ask_routes_one_sentence_to_options_without_booking(client, monkeypatch):
+def test_unclear_unsafe_or_unbookable_requests_are_asked_back(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    tiny = ask(client, "something to eat under 1 rupees")
+    assert tiny["quotes"] == [] and "No demo meals fit" in tiny["clarification"]
+    assert ask(client, "book a taxi")["status"] == "needs_details"
+    assert ask(client, "chest pain emergency")["clarification"].startswith("Saathi cannot")
+    assert "medical diets" in ask(client, "food please, I have a peanut allergy")["clarification"]
+    assert client.get("/api/hub/state").json()["quotes"] == []
+
+
+def test_ask_routes_one_sentence_to_quotes_without_booking(client, monkeypatch):
     monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
     ride = ask(client, "Take me to Dr Mehta's clinic please")
     assert (ride["service"], ride["status"], ride["understood_by"]) == (
         "ride",
-        "proposed",
+        "quoted",
         "keywords",
     )
     assert ride["input"]["destination"] == "Dr Mehta's clinic"
-    assert {option["provider"] for option in ride["options"]} == {"uber", "ola", "rapido"}
+    assert {q["app_id"] for q in ride["quotes"]} == {"uber", "ola", "rapido"}
+    assert {q["request_id"] for q in ride["quotes"]} == {ride["request_id"]}
     food = ask(client, "something light to eat under 120", channel="app")
-    assert [option["id"] for option in food["options"]] == ["swiggy-khichdi"]
+    assert [(q["app_id"], q["details"]["items"][0]["item_id"]) for q in food["quotes"]] == [
+        ("swiggy", "khichdi")
+    ]
     state = client.get("/api/hub/state").json()
     assert state["activity"] == []
-    assert {item["id"] for item in state["requests"]} == {ride["id"], food["id"]}
-    assert confirm(client, ride, "uber-go").json()["reference"].startswith("SIM-")
+    uber = next(q for q in ride["quotes"] if q["option_id"] == "uber-go")
+    assert ok(confirm(client, uber))["provider_booking_id"].startswith("DEMO-RIDE-")
 
 
 def test_ask_asks_back_instead_of_guessing(client, monkeypatch):
     monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
     unclear = ask(client, "what is the weather")
-    assert (unclear["service"], unclear["options"]) == (None, [])
+    assert (unclear["service"], unclear["quotes"]) == (None, [])
     assert "ride, food or medicine" in unclear["clarification"]
     where = ask(client, "book me a taxi")
     assert (where["service"], where["status"]) == ("ride", "needs_details")
     assert ask(client, "I have chest pain")["clarification"].startswith("Saathi cannot respond")
-    assert client.get("/api/hub/state").json()["requests"] == []
+    assert client.get("/api/hub/state").json()["quotes"] == []
+
+
+def test_ask_explains_how_to_connect_a_missing_service(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    ok(client.post("/api/hub/services/RIDE/disconnect"))
+    reply = ask(client, "Take me to the market")
+    assert reply["quotes"] == [] and reply["service"] == "ride"
+    assert reply["clarification"] == "Connect the Demo Ride Provider first, in Services."
 
 
 def test_ask_uses_gemini_when_configured(client, monkeypatch):
@@ -233,7 +243,7 @@ def test_gemini_hears_the_recording_and_routes_it(client, monkeypatch):
     assert heard == [(WAV, "audio/wav")]
     assert (result["service"], result["status"], result["understood_by"]) == (
         "ride",
-        "proposed",
+        "quoted",
         "gemini",
     )
     assert (result["transcript"], result["channel"]) == ("मुझे पार्क जाना है", "voice")
@@ -272,27 +282,31 @@ def test_caregiver_cannot_ask(app, client):
         assert refused.status_code == 403
 
 
-def test_channels_share_history_and_profile(client):
+def test_channels_share_history_and_profile(client, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
     profile = client.get("/api/hub/state").json()["profile"]
     profile.update(name="Demo user", large_text=True, language="hi-IN", budget=120)
     client.put("/api/hub/profile", json=profile)
     for channel in ["app", "message", "voice"]:
-        proposal = propose(client, channel=channel)
-        assert [option["id"] for option in proposal["options"]] == ["swiggy-khichdi"]
-        confirm(client, proposal)
+        reply = ask(client, "I am hungry, something light", channel=channel)
+        assert [q["option_id"] for q in reply["quotes"]] == ["swiggy"]
+        ok(confirm(client, reply["quotes"][0]))
     state = client.get("/api/hub/state").json()
     assert state["profile"]["name"] == "Demo user"
     assert len(state["activity"]) == 3
     assert {item["channel"] for item in state["activity"]} == {"app", "message", "voice"}
+    assert {m["channel"] for m in state["messages"]} == {"app", "message", "voice"}
 
 
-def test_expired_options_rejected(client, monkeypatch):
+def test_expired_quotes_cannot_be_confirmed(client, monkeypatch):
     import time
 
-    proposal = propose(client)
+    quote = quotes(client)[0]
     now = time.time()
-    monkeypatch.setattr("app.hub.time.time", lambda: now + 901)
-    assert confirm(client, proposal).status_code == 409
+    monkeypatch.setattr("app.bookings.time.time", lambda: now + 901)
+    expired = confirm(client, quote)
+    assert expired.status_code == 409 and "expired" in expired.json()["detail"]
+    assert client.get("/api/hub/state").json()["activity"] == []
 
 
 def test_cross_site_requests_rejected(client):
@@ -326,10 +340,11 @@ def test_extra_origin_from_environment_is_accepted_and_others_are_not(tmp_path, 
 
 
 def test_reset_clears_history(client):
-    confirm(client, propose(client))
+    book(client)
     result = client.delete("/api/hub/data")
     assert result.status_code == 200
     assert result.json()["activity"] == []
+    assert result.json()["onboarding"]["completed"] is False
 
 
 def test_cookie_tamper_rejected(app):
@@ -348,8 +363,26 @@ def test_simplified_view_is_saved_and_older_profiles_default_to_full(client):
 
 
 def test_local_data_survives_app_restart(client):
-    confirm(client, propose(client))
+    booked = book(client)
     cookie = client.cookies.get("__session")
     with TestClient(create_app(Settings(environment="test"))) as restarted:
         restarted.cookies.set("__session", cookie)
-        assert len(restarted.get("/api/hub/state").json()["activity"]) == 1
+        activity = restarted.get("/api/hub/state").json()["activity"]
+        assert activity == [booked]
+        assert activity[0]["booking_status"] == "CONFIRMED_SIMULATED"
+        assert activity[0]["payment"]["status"] == "SUCCEEDED_SIMULATED"
+
+
+def test_demo_data_saved_by_an_older_version_starts_again(client, tmp_path):
+    import json
+    import sqlite3
+
+    book(client)
+    with sqlite3.connect(tmp_path / "hub.db") as db:
+        owner, raw = db.execute("SELECT id, state FROM accounts").fetchone()
+        older = json.loads(raw)
+        older.pop("schema")
+        older["activity"] = [{"id": "x", "status": "simulated_confirmed", "option": {}}]
+        db.execute("UPDATE accounts SET state=? WHERE id=?", (json.dumps(older), owner))
+    fresh = client.get("/api/hub/state").json()
+    assert fresh["activity"] == [] and fresh["onboarding"]["completed"] is False

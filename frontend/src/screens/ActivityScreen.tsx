@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api } from '../hub'
+import { api, live } from '../hub'
 import type { Activity } from '../hub'
 import { applyFilters, noFilters } from '../filters'
 import ActivityFilters from '../components/ActivityFilters'
@@ -10,8 +10,8 @@ import type { Hub } from './hubType'
 export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simple?: boolean }) {
   const { state, busy, run, refresh } = hub
   const [filters, setFilters] = useState(noFilters)
-  const cancel = (item: Activity) => ['awaiting_approval', 'simulated_confirmed'].includes(item.status) ? (
-    <button className="secondary" disabled={busy} onClick={() => void run(async () => { await api(`/activity/${item.id}/cancel`, 'POST', {}); await refresh() })}>Cancel request</button>
+  const cancel = (item: Activity) => live(item) ? (
+    <button className="secondary" disabled={busy} onClick={() => void run(async () => { await api(`/bookings/${item.id}/cancel`, 'POST'); await refresh() })}>Cancel booking</button>
   ) : null
   if (simple) {
     return (

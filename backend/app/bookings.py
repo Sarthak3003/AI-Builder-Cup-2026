@@ -13,15 +13,18 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain import QUOTE_TTL_SECONDS, SERVICE_KEY, ServiceType
+from app.care import add_event
+from app.domain import APPROVAL_TTL_SECONDS, QUOTE_TTL_SECONDS, SERVICE_KEY, ServiceType
 from app.onboarding import connected, default_pickup
 from app.providers import (
     APP_NAMES,
     MAX_LINES,
     RIDE_OPTIONS,
+    CreateBookingRequest,
     ItemRequest,
     PlaceRef,
     ProviderError,
+    ProviderQuote,
     QuoteRequest,
     provider_for,
     ride_option_ids,
@@ -118,7 +121,9 @@ def _prune(state: dict) -> None:
     state["quotes"] = kept
 
 
-def create_quotes(state: dict, body: QuoteIn, enabled_apps: list[str], now=None) -> dict:
+def create_quotes(
+    state: dict, body: QuoteIn, enabled_apps: list[str], now=None, group: str | None = None
+) -> dict:
     now = time.time() if now is None else now
     expire_quotes(state, now)
     service_type = body.service_type
@@ -152,7 +157,7 @@ def create_quotes(state: dict, body: QuoteIn, enabled_apps: list[str], now=None)
     else:
         requests = [QuoteRequest(service_type="PHARMACY", items=body.items)]
 
-    request_id = uuid4().hex
+    request_id = group or uuid4().hex
     method = state["profile"].get("payment_method") or "PAY_ON_COMPLETION"
     quotes = []
     for request in requests:
@@ -187,3 +192,443 @@ def create_quotes(state: dict, body: QuoteIn, enabled_apps: list[str], now=None)
 def active_quotes(state: dict, now=None) -> list[dict]:
     expire_quotes(state, time.time() if now is None else now)
     return [quote for quote in state["quotes"] if quote["status"] == "ACTIVE"]
+
+
+# --- Confirmation, approval and simulated payment -----------------------------------------
+
+
+class ConfirmIn(BaseModel):
+    """Only a quote id (in the path), a retry key and an explicit yes. Never a price."""
+
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9-]+$")
+    confirmed: Literal[True]
+
+
+class DecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    action: Literal["approve", "reject", "ask"]
+    note: str = Field(default="", max_length=300)
+
+
+OFFER_FIELDS = tuple(ProviderQuote.model_fields)
+LIVE = {"AWAITING_APPROVAL", "CONFIRMED_SIMULATED"}
+
+
+def _offer(record: dict) -> ProviderQuote:
+    return ProviderQuote.model_validate({key: record[key] for key in OFFER_FIELDS})
+
+
+def event_label(booking: dict) -> str:
+    # Item names stay out of the shared timeline for pharmacy orders.
+    return "a pharmacy order" if booking["service_type"] == "PHARMACY" else booking["title"]
+
+
+def find_booking(state: dict, booking_id: str) -> dict:
+    booking = next((b for b in state["activity"] if b["id"] == booking_id), None)
+    if not booking:
+        raise HTTPException(404, "Booking not found.")
+    return booking
+
+
+def _approval(state: dict, booking: dict) -> dict | None:
+    return next((a for a in state["approvals"] if a["id"] == booking.get("approval_id")), None)
+
+
+def _pay(booking: dict, status: str, now: float) -> None:
+    booking["payment"].update(status=status, updated_at=now)
+
+
+def _execute(state: dict, booking: dict, now: float) -> None:
+    """Ask the demo provider to book. A refusal is recorded as a failure, never as success."""
+    demo = state.setdefault("demo", {})
+    # The demo failure switch is used up by the next real attempt to book, and only by that.
+    simulate_failure = bool(demo.get("fail_next"))
+    demo["fail_next"] = False
+    provider = provider_for(booking["service_type"], state["provider_ledger"])
+    request = CreateBookingRequest(
+        quote=_offer(booking),
+        idempotency_key=booking["idempotency_key"],
+        simulate_failure=simulate_failure,
+    )
+    try:
+        result = provider.create_booking(request)
+    except ProviderError as error:
+        booking.update(
+            booking_status="FAILED",
+            failure=f"{error.message} Nothing was booked or charged.",
+            updated_at=now,
+        )
+        _pay(booking, "NOT_CHARGED_SIMULATED", now)
+        add_event(
+            state,
+            "booking_failed",
+            f"Booking failed: {event_label(booking)}",
+            "Simulated failure. Nothing was booked or charged.",
+            permission="receive_alerts",
+            ref=booking["id"],
+            severity="attention",
+        )
+        return
+    booking.update(
+        booking_status="CONFIRMED_SIMULATED",
+        provider_booking_id=result.provider_booking_id,
+        updated_at=now,
+    )
+    wallet = booking["payment"]["method"] == "DEMO_WALLET"
+    _pay(booking, "SUCCEEDED_SIMULATED" if wallet else "PENDING_SIMULATED", now)
+    add_event(
+        state,
+        "booked",
+        f"Booked (simulated): {event_label(booking)}",
+        f"{booking['provider_label']} · {result.provider_booking_id}. {booking['notice']}",
+        ref=booking["id"],
+    )
+    add_event(
+        state,
+        "payment",
+        "Paid from the demo wallet (simulated)" if wallet else "Pay on completion (simulated)",
+        "No money was charged." if wallet else "Nothing charged yet. No real money will move.",
+        permission="view_payments",
+        ref=booking["id"],
+    )
+
+
+def _appointment_event(state: dict, booking: dict) -> None:
+    linked = next(
+        (a for a in state.get("appointments", []) if a["id"] == booking.get("appointment_id")),
+        None,
+    )
+    if not linked or booking["booking_status"] == "FAILED":
+        return
+    linked["ride_request_id"] = booking["id"]
+    waiting = booking["booking_status"] == "AWAITING_APPROVAL"
+    add_event(
+        state,
+        "appointment_ride",
+        f"Ride for {linked['title']} is waiting for approval"
+        if waiting
+        else f"Ride arranged for {linked['title']}",
+        f"{booking['title']}. Simulated: no real driver will come.",
+        ref=booking["id"],
+        topic="appointments",
+    )
+
+
+def confirm_quote(
+    state: dict, quote_id: str, body: ConfirmIn, enabled_apps: list[str], now=None
+) -> tuple[dict, bool]:
+    """Make at most one booking per idempotency key. Returns the booking and whether it is new."""
+    now = time.time() if now is None else now
+    key = body.idempotency_key
+    earlier = next((b for b in state["activity"] if b.get("idempotency_key") == key), None)
+    if earlier:
+        if earlier["quote_id"] != quote_id:
+            raise HTTPException(409, "This confirmation was already used for another booking.")
+        return earlier, False
+    quote = next((q for q in state["quotes"] if q["id"] == quote_id), None)
+    if not quote:
+        raise HTTPException(404, "Quote not found. Please get a new quote.")
+    expire_quotes(state, now)
+    if quote["status"] == "CONSUMED":
+        raise HTTPException(409, "This quote was already used. See Activity for the booking.")
+    if quote["status"] == "EXPIRED":
+        raise HTTPException(409, "This quote has expired. Please get a new quote.")
+    if not connected(state, quote["service_type"]):
+        raise HTTPException(409, f"Connect the {quote['provider_label']} first, in Services.")
+    if quote["app_id"] and quote["app_id"] not in enabled_apps:
+        raise HTTPException(409, f"{quote['app_name']} is switched off in Services.")
+
+    reason = approval_reason(state, quote["service_type"], quote["amount_minor"])
+    booking = {
+        "id": uuid4().hex,
+        "quote_id": quote["id"],
+        "request_id": quote["request_id"],
+        "idempotency_key": key,
+        **{field: quote[field] for field in OFFER_FIELDS},
+        "service": quote["service"],
+        "provider_booking_id": None,
+        "booking_status": "AWAITING_APPROVAL" if reason else "CONFIRMED_SIMULATED",
+        "payment": {
+            "method": quote["payment_method"],
+            "status": "NOT_CHARGED_SIMULATED",
+            "amount_minor": quote["amount_minor"],
+            "currency": quote["currency"],
+            "simulated": True,
+            "updated_at": now,
+            "refund": None,
+        },
+        "channel": quote["channel"],
+        "shared": state["profile"].get("sharing", {}).get(quote["service"], True),
+        "approval_id": None,
+        "approval_reason": reason,
+        "appointment_id": quote["appointment_id"],
+        "decision": None,
+        "questions": [],
+        "failure": "",
+        "created_at": now,
+        "updated_at": now,
+    }
+    quote.update(status="CONSUMED", consumed_at=now, booking_id=booking["id"])
+    for other in state["quotes"]:
+        # The other options from the same request can no longer be booked.
+        if other["request_id"] == quote["request_id"] and other["status"] == "ACTIVE":
+            other["status"] = "EXPIRED"
+    state["activity"].insert(0, booking)
+    if reason:
+        approval = {
+            "id": uuid4().hex[:12],
+            "booking_id": booking["id"],
+            "quote_id": quote["id"],
+            "action_type": "CONFIRM_BOOKING",
+            "summary": booking["title"],
+            "amount_minor": booking["amount_minor"],
+            "currency": booking["currency"],
+            "reason": reason,
+            "status": "PENDING",
+            "requested_at": now,
+            "expires_at": now + APPROVAL_TTL_SECONDS,
+            "decided_at": None,
+            "decided_by": None,
+            "decided_by_name": None,
+            "note": "",
+        }
+        state["approvals"].append(approval)
+        booking["approval_id"] = approval["id"]
+        approvers = [
+            g
+            for g in state.get("care_circle", [])
+            if g["status"] != "revoked" and "approve" in g["permissions"]
+        ]
+        add_event(
+            state,
+            "approval_needed",
+            f"Approval needed: {event_label(booking)}",
+            reason if approvers else f"{reason} No one in the Care Circle can approve yet.",
+            permission="approve",
+            ref=booking["id"],
+            severity="attention",
+        )
+    else:
+        _execute(state, booking, now)
+    _appointment_event(state, booking)
+    return booking, True
+
+
+def _close_approval_alerts(state: dict, booking_id: str, by: str, now: float) -> None:
+    for event in state["events"]:
+        if event["ref"] == booking_id and event["kind"] == "approval_needed":
+            if event["status"] == "open":
+                event.update(status="resolved", resolved_by=by, resolved_at=now)
+
+
+def expire_approvals(state: dict, now=None) -> None:
+    """An approval nobody gave in time lapses: the booking is not made and nothing is charged."""
+    now = time.time() if now is None else now
+    for approval in state["approvals"]:
+        if approval["status"] != "PENDING" or approval["expires_at"] > now:
+            continue
+        approval.update(status="EXPIRED", decided_at=now)
+        booking = next((b for b in state["activity"] if b["id"] == approval["booking_id"]), None)
+        if not booking or booking["booking_status"] != "AWAITING_APPROVAL":
+            continue
+        booking.update(
+            booking_status="CANCELLED_SIMULATED",
+            failure="The approval request expired. Nothing was booked or charged.",
+            updated_at=now,
+        )
+        _close_approval_alerts(state, booking["id"], "expired", now)
+        add_event(
+            state,
+            "approval_expired",
+            f"Approval request expired: {event_label(booking)}",
+            "Nothing was booked or charged.",
+            ref=booking["id"],
+        )
+
+
+def decide(
+    state: dict, booking_id: str, body: DecisionIn, grant: dict, now=None
+) -> tuple[dict, bool]:
+    """An approver's decision. Approving books through the provider; declining charges nothing.
+
+    Returns the booking and whether anything changed: repeating the same decision is a no-op.
+    """
+    now = time.time() if now is None else now
+    booking = find_booking(state, booking_id)
+    approval = _approval(state, booking)
+    if body.action == "ask":
+        if booking["booking_status"] != "AWAITING_APPROVAL":
+            raise HTTPException(409, "This request is no longer waiting for approval.")
+        question = body.note or "Could you tell me a little more about this request?"
+        booking["questions"].append({"by": grant["name"], "text": question, "at": now})
+        add_event(
+            state,
+            "question",
+            f"{grant['name']} asked about {event_label(booking)}",
+            question,
+            permission="approve",
+            ref=booking_id,
+            severity="attention",
+            actor=grant["name"],
+        )
+        return booking, True
+    earlier = booking.get("decision")
+    if earlier:
+        if earlier["by"] == grant["id"] and earlier["action"] == body.action:
+            return booking, False
+        done = "approved" if earlier["action"] == "approve" else "declined"
+        raise HTTPException(409, f"Already {done} by {earlier['name']}.")
+    if booking["booking_status"] != "AWAITING_APPROVAL" or not approval:
+        raise HTTPException(409, "This request is no longer waiting for approval.")
+    if approval["status"] != "PENDING" or approval["expires_at"] <= now:
+        raise HTTPException(409, "This approval request has expired. Nothing was booked.")
+    approved = body.action == "approve"
+    approval.update(
+        status="APPROVED" if approved else "REJECTED",
+        decided_at=now,
+        decided_by=grant["id"],
+        decided_by_name=grant["name"],
+        note=body.note,
+    )
+    booking["decision"] = {
+        "action": body.action,
+        "by": grant["id"],
+        "name": grant["name"],
+        "note": body.note,
+        "at": now,
+    }
+    _close_approval_alerts(state, booking_id, grant["name"], now)
+    add_event(
+        state,
+        "approved" if approved else "declined",
+        f"{grant['name']} {'approved' if approved else 'declined'} {event_label(booking)}",
+        "Sent to the demo provider." if approved else body.note,
+        ref=booking_id,
+        actor=grant["name"],
+    )
+    if approved:
+        _execute(state, booking, now)
+    else:
+        booking.update(booking_status="DECLINED", updated_at=now)
+    linked = next(
+        (a for a in state.get("appointments", []) if a["id"] == booking.get("appointment_id")),
+        None,
+    )
+    if linked:
+        booked = booking["booking_status"] == "CONFIRMED_SIMULATED"
+        if not booked:
+            linked["ride_request_id"] = None
+        add_event(
+            state,
+            "appointment_ride",
+            f"Ride arranged for {linked['title']}"
+            if booked
+            else f"No ride booked for {linked['title']}",
+            "Simulated: no real driver will come." if booked else "Nothing was booked.",
+            ref=booking_id,
+            topic="appointments",
+            severity="info" if booked else "attention",
+        )
+    return booking, True
+
+
+def cancel(state: dict, booking_id: str, now=None) -> dict:
+    now = time.time() if now is None else now
+    booking = find_booking(state, booking_id)
+    status = booking["booking_status"]
+    if status == "CANCELLED_SIMULATED":
+        return booking
+    if status not in LIVE:
+        raise HTTPException(409, "This booking can no longer be cancelled.")
+    if status == "CONFIRMED_SIMULATED":
+        provider = provider_for(booking["service_type"], state["provider_ledger"])
+        try:
+            provider.cancel_booking(booking["provider_booking_id"])
+        except ProviderError as error:
+            raise HTTPException(409, error.message) from None
+    approval = _approval(state, booking)
+    if approval and approval["status"] == "PENDING":
+        approval.update(status="CANCELLED", decided_at=now)
+    _close_approval_alerts(state, booking_id, "owner", now)
+    booking.update(booking_status="CANCELLED_SIMULATED", updated_at=now)
+    payment = booking["payment"]
+    if payment["status"] == "SUCCEEDED_SIMULATED":
+        # Booking and payment stay separate facts: the payment happened, then a refund.
+        payment["refund"] = {"status": "REFUNDED_SIMULATED", "at": now}
+        add_event(
+            state,
+            "payment",
+            "Simulated refund recorded",
+            "No real money moved either way.",
+            permission="view_payments",
+            ref=booking_id,
+        )
+    elif payment["status"] == "PENDING_SIMULATED":
+        _pay(booking, "NOT_CHARGED_SIMULATED", now)
+    linked = next(
+        (a for a in state.get("appointments", []) if a["id"] == booking.get("appointment_id")),
+        None,
+    )
+    if linked:
+        linked["ride_request_id"] = None
+    add_event(
+        state,
+        "ride_cancelled" if linked else "cancelled",
+        f"Ride for {linked['title']} was cancelled"
+        if linked
+        else f"Cancelled: {event_label(booking)}",
+        "Cancelled by the owner (simulated).",
+        ref=booking_id,
+        severity="attention" if linked else "info",
+        actor="owner",
+    )
+    return booking
+
+
+def complete(state: dict, booking_id: str, now=None) -> dict:
+    """Demo control: the simulated trip or delivery has finished. Payment is not touched."""
+    now = time.time() if now is None else now
+    booking = find_booking(state, booking_id)
+    if booking["booking_status"] == "COMPLETED_SIMULATED":
+        return booking
+    if booking["booking_status"] != "CONFIRMED_SIMULATED":
+        raise HTTPException(409, "Only a confirmed booking can be completed.")
+    provider = provider_for(booking["service_type"], state["provider_ledger"])
+    try:
+        provider.complete_booking(booking["provider_booking_id"])
+    except ProviderError as error:
+        raise HTTPException(409, error.message) from None
+    booking.update(booking_status="COMPLETED_SIMULATED", updated_at=now)
+    add_event(
+        state,
+        "completed",
+        f"Completed (simulated): {event_label(booking)}",
+        "The demo provider marked it finished.",
+        ref=booking_id,
+    )
+    return booking
+
+
+def settle(state: dict, booking_id: str, now=None) -> dict:
+    """Demo control: a pay-on-completion payment is marked paid. No real money moves."""
+    now = time.time() if now is None else now
+    booking = find_booking(state, booking_id)
+    payment = booking["payment"]
+    if payment["status"] == "SUCCEEDED_SIMULATED":
+        return booking
+    if payment["status"] != "PENDING_SIMULATED" or booking["booking_status"] not in {
+        "CONFIRMED_SIMULATED",
+        "COMPLETED_SIMULATED",
+    }:
+        raise HTTPException(409, "Only a pending simulated payment can be marked complete.")
+    _pay(booking, "SUCCEEDED_SIMULATED", now)
+    add_event(
+        state,
+        "payment",
+        "Simulated payment marked complete",
+        "No real money moved.",
+        permission="view_payments",
+        ref=booking_id,
+    )
+    return booking

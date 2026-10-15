@@ -8,7 +8,7 @@ import type { Hub } from './hubType'
 function AppToggles({ hub, service }: { hub: Hub; service: DemoService }) {
   const { state, busy, run, setState } = hub
   const enabled = state.profile.enabled_providers
-  const apps = state.catalogue.filter((app) => app.service === serviceOf[service.service_type] && app.id !== 'pharmacy')
+  const apps = state.catalogue.filter((app) => app.service === serviceOf[service.service_type])
   if (!apps.length) return null
   const toggle = (id: string) => {
     const next = enabled.includes(id) ? enabled.filter((item) => item !== id) : [...enabled, id]

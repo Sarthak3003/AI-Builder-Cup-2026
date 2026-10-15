@@ -49,22 +49,19 @@ def test_uber_eats_is_food_not_a_ride():
     assert draft.service == "food"
 
 
-def test_medicine_uses_the_saved_label_named():
+@pytest.mark.parametrize(
+    "message",
+    ["I need ORS sachets", "Please order a crepe bandage", "दवा चाहिए", "Refill my pills"],
+)
+def test_pharmacy_words_route_to_the_pharmacy_with_the_words_for_matching(message):
+    draft, question = understand(message, PROFILE)
+    assert (draft.service, draft.clarification, question) == ("medicine", "", "")
+    assert draft.medicine == message
+
+
+def test_saved_medicine_labels_are_not_used_to_order_anything():
     draft, _ = understand("Please refill my vitamin d", PROFILE)
-    assert (draft.service, draft.medicine, draft.clarification) == ("medicine", "Vitamin D", "")
-
-
-def test_medicine_asks_which_when_several_are_saved():
-    draft, _ = understand("I need my medicine", PROFILE)
-    assert draft.service == "medicine"
-    assert "Vitamin D, Saved medicine A" in draft.clarification
-
-
-def test_medicine_with_one_saved_label_uses_it_and_with_none_asks_to_add_one():
-    draft, _ = understand("दवा चाहिए", {"medicines": ["BP tablet"]})
-    assert draft.medicine == "BP tablet"
-    draft, _ = understand("Refill my pills", {"medicines": []})
-    assert "Add your medicine" in draft.clarification
+    assert draft.service == "medicine" and draft.medicine == "Please refill my vitamin d"
 
 
 @pytest.mark.parametrize(

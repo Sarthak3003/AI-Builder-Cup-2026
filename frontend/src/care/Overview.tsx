@@ -15,7 +15,7 @@ export default function Overview({ hub }: { hub: CareHub }) {
   const missed = state.reminders.filter((reminder) => reminder.status === 'missed')
   const attention = approvals.length + alerts.length + missed.length
   const upcoming = state.appointments.filter((a) => a.starts_at > now - 3600 && a.starts_at < now + WEEK)
-  const active = state.activity.filter((item) => ['awaiting_approval', 'simulated_confirmed', 'failed'].includes(item.status))
+  const active = state.activity.filter((item) => ['AWAITING_APPROVAL', 'CONFIRMED_SIMULATED', 'FAILED'].includes(item.booking_status))
   const updates = state.events.slice(0, 5)
 
   return (
@@ -52,7 +52,7 @@ export default function Overview({ hub }: { hub: CareHub }) {
         <h2 id="orders-title">Active rides and orders</h2>
         {active.length ? (
           <ul className="plain-list">
-            {active.map((item) => <li key={item.id}><a href={`#/activity/${item.id}`}>{item.option.name}</a> · {statusLabel[item.status]}</li>)}
+            {active.map((item) => <li key={item.id}><a href={`#/activity/${item.id}`}>{item.title}</a> · {statusLabel[item.booking_status]}</li>)}
           </ul>
         ) : <p className="muted">{allowed(hub, 'view_activity') ? 'Nothing active.' : 'Activity is not shared with you.'}</p>}
       </section>

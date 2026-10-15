@@ -24,9 +24,9 @@ export default function AskSaathi({ hub, simple = false }: { hub: Hub; simple?: 
   const field = useRef<HTMLInputElement>(null)
 
   async function show(result: AskResult) {
-    if (result.service && result.options.length) {
+    if (result.service && result.quotes.length && result.request_id) {
       await refresh()
-      window.location.hash = `#/request/${result.service}/${result.id}`
+      window.location.hash = `#/request/${result.service}/${result.request_id}`
       return
     }
     setReply(result)
@@ -80,7 +80,7 @@ export default function AskSaathi({ hub, simple = false }: { hub: Hub; simple?: 
         {reply ? (
           <p className="clarify">
             {reply.clarification}{' '}
-            {reply.service ? <a href={`#/request/${reply.service}`}>Open {serviceNames[reply.service]}</a> : null}
+            {reply.clarification.includes('Services') ? <a href="#/services">Open Services</a> : reply.service ? <a href={`#/request/${reply.service}`}>Open {serviceNames[reply.service]}</a> : null}
           </p>
         ) : null}
         {problem ? <p className="inline-note">{problem}</p> : null}

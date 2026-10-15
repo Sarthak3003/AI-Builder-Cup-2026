@@ -2,81 +2,74 @@ import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
-import type { Activity, CareEvent, Conversation, Grant, HubState, Option, Proposal, Reminder } from './hub'
+import type { CareEvent, Conversation, Grant, HubState, Reminder } from './hub'
 import { applyFilters, noFilters } from './filters'
-import { fail, makeCareState, makeState, stubApi, swiggyMeal, uberRide } from './test-utils'
+import { booking, fail, makeCareState, makeState, mealQuote, rideQuote, stubApi } from './test-utils'
 
 beforeEach(() => window.history.replaceState(null, '', '/'))
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 const now = () => Date.now() / 1000
-function order(option: Option, status = 'simulated_confirmed', extra: Partial<Activity> = {}): Activity {
-  const paid = status === 'simulated_confirmed' ? 'pending_simulated' : status === 'completed' ? 'succeeded_simulated' : 'not_charged_simulated'
-  return {
-    id: `id-${option.id}-${status}`, service: option.provider === 'swiggy' ? 'food' : 'ride', channel: 'app', option, status,
-    created_at: now() - 60, reference: 'SIM-AAAA1111', simulated: true, shared: true,
-    payment: { method: 'pay_on_completion', status: paid, amount: option.price, simulated: true }, questions: [], decision: null, ...extra,
-  } as Activity
-}
+const ride = () => booking(rideQuote())
 const event = (overrides: Partial<CareEvent>): CareEvent => ({
   id: 'ev1', at: now() - 30, kind: 'booked', title: 'Booked (simulated)', detail: '', permission: 'view_activity', ref: null,
   severity: 'info', certainty: 'confirmed', actor: 'saathi', status: 'info', ...overrides,
 })
 const asha: Grant = { id: 'g1', name: 'Asha', relationship: 'Daughter', role: 'approver', permissions: ['approve', 'view_activity', 'view_medication'], status: 'active' }
 const summary = (overrides: Partial<Conversation> = {}): Conversation => ({
-  id: 'conv1', channel: 'voice', at: now() - 120, service: 'ride', request_id: 'id-uber-go-simulated_confirmed', safety: null, status: 'simulated_confirmed',
-  summary: { by: 'rules', text: 'Asked for a ride to Sunrise Clinic.', confirmed: ['Booked Uber Go with Uber (simulated). Nothing charged yet.'], suggestions: ['Ask whether someone could go along to the appointment.'] },
+  id: 'conv1', channel: 'voice', at: now() - 120, service: 'ride', request_id: 'r-1', safety: null, status: 'CONFIRMED_SIMULATED',
+  summary: { by: 'rules', text: 'Asked for a ride to Doctor.', confirmed: ['Booked Uber Go to Doctor with the Demo Ride Provider (simulated).'], suggestions: ['Ask whether someone could go along to the appointment.'] },
   ...overrides,
 })
 
 // ---------- Owner ----------
 
 test('booking status and simulated payment status are shown as separate facts', async () => {
-  stubApi({}, makeState({ activity: [order(uberRide), order(swiggyMeal, 'completed'), order(uberRide, 'failed', { failure: 'Simulated provider failure: nothing was booked or charged.' })] }))
+  const pending = booking(rideQuote({ payment_method: 'PAY_ON_COMPLETION' }))
+  stubApi({}, makeState({ activity: [pending, booking(mealQuote(), 'COMPLETED_SIMULATED'), booking(rideQuote(), 'FAILED', { failure: 'The Demo Ride Provider could not take this booking (simulated failure). Nothing was booked or charged.' })] }))
   window.location.hash = '#/activity'
   render(<App />)
   expect(await screen.findByText('Booked · simulated')).toBeInTheDocument()
-  expect(screen.getByText('Payment: Pay on completion (simulated) · nothing charged yet')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Pending (simulated) · nothing charged yet')).toBeInTheDocument()
   expect(screen.getByText('Completed · simulated')).toBeInTheDocument()
-  expect(screen.getByText('Payment: Paid (simulated) · no real money moved')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Paid (simulated) · no money charged')).toBeInTheDocument()
   expect(screen.getByText('Failed · nothing booked')).toBeInTheDocument()
   expect(screen.getByText('Payment: Not charged (simulated)')).toBeInTheDocument()
   expect(screen.queryByText(/Completed/, { selector: '.status.failed' })).not.toBeInTheDocument()
 })
 
 test('activity filters by type, status and date', () => {
-  const items = [order(uberRide), order(swiggyMeal, 'completed'), order(uberRide, 'failed'), { ...order(uberRide, 'cancelled'), created_at: now() - 10 * 86_400 }]
-  expect(applyFilters(items, { ...noFilters, status: 'failed' }).map((i) => i.status)).toEqual(['failed'])
-  expect(applyFilters(items, { ...noFilters, service: 'food' }).map((i) => i.status)).toEqual(['completed'])
+  const items = [ride(), booking(mealQuote(), 'COMPLETED_SIMULATED'), booking(rideQuote(), 'FAILED'), { ...booking(rideQuote(), 'CANCELLED_SIMULATED'), created_at: now() - 10 * 86_400 }]
+  expect(applyFilters(items, { ...noFilters, status: 'failed' }).map((i) => i.booking_status)).toEqual(['FAILED'])
+  expect(applyFilters(items, { ...noFilters, service: 'food' }).map((i) => i.booking_status)).toEqual(['COMPLETED_SIMULATED'])
   expect(applyFilters(items, { ...noFilters, range: 'week' })).toHaveLength(3)
   expect(applyFilters(items, { ...noFilters, status: 'cancelled', range: 'week' })).toHaveLength(0)
 })
 
 test('a failed booking says nothing was booked or charged and offers a way forward', async () => {
-  const proposal: Proposal = { id: 'p1', service: 'ride', channel: 'app', options: [uberRide], clarification: '', summary: 'Ride options', status: 'proposed', expires_at: now() + 900 }
-  stubApi({ 'POST /requests': () => proposal, 'POST /requests/*/confirm': () => order(uberRide, 'failed', { failure: 'x' }) })
+  stubApi({ 'POST /quotes': () => ({ request_id: 'r-1', service_type: 'RIDE', quotes: [rideQuote()] }), 'POST /quotes/*/confirm': () => booking(rideQuote(), 'FAILED', { failure: 'x' }) })
   window.location.hash = '#/request/ride'
   render(<App />)
-  await userEvent.type(await screen.findByRole('textbox', { name: 'Where to?' }), 'Clinic')
-  await userEvent.click(screen.getByRole('button', { name: 'Show options' }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Choose Uber Go from Uber' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Confirm demo booking' }))
   expect(await screen.findByRole('heading', { name: 'Booking failed' })).toBeInTheDocument()
   expect(screen.getByText(/Nothing was booked and nothing was charged/)).toBeInTheDocument()
-  expect(screen.queryByRole('heading', { name: 'All done' })).not.toBeInTheDocument()
+  expect(screen.getByText('Not charged (simulated)')).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Demo booking confirmed' })).not.toBeInTheDocument()
+  expect(screen.queryByText('DEMO-RIDE-1042')).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
 })
 
 test('a ride for an appointment shows the appointment and only suggests asking someone along', async () => {
   const appointment = { id: 'appt1', title: 'Check-up with Dr Mehta', with_whom: 'Dr Mehta', place: 'Sunrise Clinic', starts_at: now() + 86_400, notes: '', ride_request_id: null, created_by: 'owner' }
-  const proposal: Proposal = { id: 'p2', service: 'ride', channel: 'voice', options: [uberRide], clarification: '', summary: 'Rides to Sunrise Clinic for Check-up with Dr Mehta', status: 'proposed', expires_at: now() + 900, appointment_id: 'appt1', input: { message: 'Take me to my doctor' } }
-  const state = makeState({ appointments: [appointment], requests: [proposal] })
-  const calls = stubApi({ 'POST /requests/*/confirm': () => order(uberRide, 'simulated_confirmed', { appointment_id: 'appt1' }), 'POST /help': () => event({}) }, state)
-  window.location.hash = '#/request/ride/p2'
+  const quote = rideQuote({ appointment_id: 'appt1', title: 'Uber Go to Check-up with Dr Mehta' })
+  const state = makeState({ appointments: [appointment], quotes: [quote] })
+  const calls = stubApi({ 'POST /quotes/*/confirm': () => booking(quote), 'POST /help': () => event({}) }, state)
+  window.location.hash = '#/request/ride/r-1'
   render(<App />)
   expect(await screen.findByText(/For your appointment:/)).toHaveTextContent('Check-up with Dr Mehta')
-  await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Book with Uber' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
   expect(await screen.findByText(/Nobody is asked unless you choose to/)).toBeInTheDocument()
   expect(calls.some((call) => call.url.endsWith('/help'))).toBe(false)
   await userEvent.click(screen.getByRole('button', { name: 'Ask if someone can come with me' }))
@@ -118,21 +111,30 @@ test('the owner can change what is shared, remove a person and ask for help', as
   expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'help' })
 })
 
-test('activity details show the timeline, sharing switch and demo completion', async () => {
-  const booked = order(uberRide)
-  const calls = stubApi({ 'PUT /activity/*/sharing': () => ({ ...booked, shared: false }), 'POST /activity/*/complete': () => order(uberRide, 'completed') },
-    makeState({ demo_controls: true, activity: [booked], events: [event({ ref: booked.id, title: 'Booked (simulated): Uber Go with Uber' })], conversations: [summary({ request_id: booked.id })] }))
+test('activity details show the reference, timeline, sharing switch and separate demo controls', async () => {
+  const booked = booking(rideQuote({ payment_method: 'PAY_ON_COMPLETION' }))
+  const calls = stubApi({
+    'PUT /bookings/*/sharing': () => ({ ...booked, shared: false }),
+    'POST /bookings/*/complete': () => booking(rideQuote(), 'COMPLETED_SIMULATED'),
+    'POST /bookings/*/payment/complete': () => booked,
+  }, makeState({ demo_controls: true, activity: [booked], events: [event({ ref: booked.id, title: 'Booked (simulated): Uber Go to Doctor' })], conversations: [summary()] }))
   window.location.hash = `#/activity/${booked.id}`
   render(<App />)
-  expect(await screen.findByRole('heading', { name: 'Uber Go' })).toBeInTheDocument()
-  expect(screen.getByText('Booked (simulated): Uber Go with Uber')).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
+  expect(screen.getByText('DEMO-RIDE-1042 (simulated)')).toBeInTheDocument()
+  expect(screen.getByText('Home, 12 Sample Lane, Demo Nagar (sample address)')).toBeInTheDocument()
+  expect(screen.getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
+  expect(screen.getByText('CONFIRMED_SIMULATED')).toBeInTheDocument()
+  expect(screen.getByText('PENDING_SIMULATED')).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Confirmed' })).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Suggestions (not done)' })).toBeInTheDocument()
   expect(screen.getByText('Automatic summary (not AI)')).toBeInTheDocument()
   await userEvent.click(screen.getByRole('checkbox', { name: 'Share this with my Care Circle' }))
   expect(calls.find((call) => call.url.endsWith('/sharing'))?.body).toEqual({ shared: false })
-  await userEvent.click(screen.getByRole('button', { name: 'Demo: mark completed' }))
-  expect(calls.some((call) => call.url.endsWith('/complete'))).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: 'Demo: mark simulated payment complete' }))
+  expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/payment/complete`))).toBe(true)
+  await userEvent.click(screen.getByRole('button', { name: 'Demo: mark trip or delivery completed' }))
+  expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/complete`))).toBe(true)
 })
 
 test('upcoming plans flag missed reminders without claiming a medicine was taken', async () => {
@@ -211,9 +213,9 @@ test('an invitation link joins this browser as a caretaker', async () => {
 })
 
 test('the overview answers what needs action, what is coming and what changed', async () => {
-  const waiting = order(swiggyMeal, 'awaiting_approval')
+  const waiting = booking(mealQuote(), 'AWAITING_APPROVAL')
   stubApi({}, makeCareState(['view_activity', 'approve', 'receive_alerts'], {
-    approvals: [waiting], activity: [waiting, order(uberRide)],
+    approvals: [waiting], activity: [waiting, ride()],
     appointments: [{ id: 'a1', title: 'Check-up with Dr Mehta', with_whom: '', place: 'Sunrise Clinic', starts_at: now() + 86_400, notes: '', ride_request_id: 'x', created_by: 'owner' }],
     reminders: [{ id: 'r1', title: 'Call the clinic', kind: 'appointment', due_at: now() - 60, notes: '', done_at: null, status: 'missed', created_by: 'owner' }],
     events: [event({ kind: 'suspected_scam', title: 'Possible scam message', permission: 'receive_alerts', severity: 'attention', certainty: 'suspected', status: 'open' })],
@@ -228,9 +230,9 @@ test('the overview answers what needs action, what is coming and what changed', 
 })
 
 test('an approver approves, asks first, and sees a clear message if someone else already decided', async () => {
-  const waiting = order(swiggyMeal, 'awaiting_approval', { approval_reason: 'Above the ₹100 approval limit.' })
+  const waiting = booking(mealQuote(), 'AWAITING_APPROVAL', { approval_reason: 'Above the ₹100 approval limit.' })
   let decisions = 0
-  const calls = stubApi({ 'POST /activity/*/decision': () => (++decisions === 3 ? fail(409, { detail: 'Already approved by Ravi.' }) : { ...waiting }) },
+  const calls = stubApi({ 'POST /bookings/*/decision': () => (++decisions === 3 ? fail(409, { detail: 'Already approved by Ravi.' }) : { ...waiting }) },
     makeCareState(['view_activity', 'approve'], { approvals: [waiting], activity: [waiting] }))
   window.location.hash = '#/approvals'
   render(<App />)
@@ -258,7 +260,7 @@ test('summaries show confirmed actions apart from suggestions; transcripts only 
     makeCareState(['view_activity', 'view_summaries'], { conversations: [summary()] }))
   window.location.hash = '#/conversations'
   const { unmount } = render(<App />)
-  expect(await screen.findByText('Booked Uber Go with Uber (simulated). Nothing charged yet.')).toBeInTheDocument()
+  expect(await screen.findByText('Booked Uber Go to Doctor with the Demo Ride Provider (simulated).')).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Suggestions (not done)' })).toBeInTheDocument()
   expect(screen.getByText(/Full transcripts are not shared with you/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Show transcript' })).not.toBeInTheDocument()
@@ -275,7 +277,7 @@ test('safety separates suspicions from confirmed events and lets alert holders r
   const calls = stubApi({ 'POST /events/*/resolve': () => ({}) }, makeCareState(['view_activity', 'receive_alerts'], {
     events: [
       event({ id: 'e1', kind: 'suspected_scam', title: 'Possible scam message', permission: 'receive_alerts', severity: 'attention', certainty: 'suspected', status: 'open' }),
-      event({ id: 'e2', kind: 'booking_failed', title: 'Booking failed: Uber Go', permission: 'receive_alerts', severity: 'attention', status: 'open' }),
+      event({ id: 'e2', kind: 'booking_failed', title: 'Booking failed: Uber Go to Doctor', permission: 'receive_alerts', severity: 'attention', status: 'open' }),
     ],
   }))
   window.location.hash = '#/safety'
@@ -299,7 +301,7 @@ test('settings list what the caretaker can and cannot do, and leaving ends the c
 test('updates arrive without refreshing, and a revoked caretaker is told access was removed', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   let state = 0
-  stubApi({ 'GET /state': () => (++state === 1 ? makeCareState(['view_activity', 'approve'], { approvals: [order(swiggyMeal, 'awaiting_approval')] }) : fail(403, { detail: 'Your Care Circle access was removed.' })) },
+  stubApi({ 'GET /state': () => (++state === 1 ? makeCareState(['view_activity', 'approve'], { approvals: [booking(mealQuote(), 'AWAITING_APPROVAL')] }) : fail(403, { detail: 'Your Care Circle access was removed.' })) },
     makeCareState(['view_activity', 'approve']))
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()

@@ -34,9 +34,9 @@ export function DecisionButtons({ hub, item }: { hub: CareHub; item: Activity })
   const { busy, run, refresh, notify } = hub
   const [question, setQuestion] = useState('')
   const decide = (action: string, note = '') => void run(async () => {
-    await api(`/activity/${item.id}/decision`, 'POST', { action, note })
+    await api(`/bookings/${item.id}/decision`, 'POST', { action, note })
     await refresh()
-    notify(action === 'approve' ? 'Approved. The booking is confirmed (simulated).' : action === 'reject' ? 'Declined.' : 'Your question was sent.')
+    notify(action === 'approve' ? 'Approved. The demo provider was asked to book it (simulated).' : action === 'reject' ? 'Declined. Nothing was booked.' : 'Your question was sent.')
   })
   return (
     <>
@@ -56,12 +56,12 @@ export function CareDetail({ hub, id }: { hub: CareHub; id: string }) {
   const { state } = hub
   const item = state.approvals.find((entry) => entry.id === id) ?? state.activity.find((entry) => entry.id === id)
   if (!item) return <><a className="back" href="#/activity">Back to activity</a><p>That activity is not shared with you.</p></>
-  const pending = item.status === 'awaiting_approval' && allowed(hub, 'approve')
+  const pending = item.booking_status === 'AWAITING_APPROVAL' && allowed(hub, 'approve')
   return (
     <ActivityDetailView
       item={item}
       events={state.events}
-      conversation={state.conversations.find((conv) => conv.request_id === id)}
+      conversation={state.conversations.find((conv) => conv.request_id && conv.request_id === item.request_id)}
       appointment={state.appointments.find((a) => a.id === item.appointment_id)}
       actions={pending ? <DecisionButtons hub={hub} item={item} /> : null}
     />
@@ -74,7 +74,7 @@ export function Approvals({ hub }: { hub: CareHub }) {
   return (
     <>
       <h1 className="page-title">Approvals</h1>
-      <p className="muted">{state.owner.name} asked to check these before they are booked. Approving books it as a simulated booking; nothing is charged.</p>
+      <p className="muted">{state.owner.name} asked to check these before they are booked. Approving sends it to the demo provider as a simulated booking; nothing real is booked or charged.</p>
       <ActivityList
         items={state.approvals}
         empty={<p>Nothing is waiting for you.</p>}

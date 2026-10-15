@@ -1,244 +1,317 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, formatWhen, paymentLabel, serviceNames, waitText } from '../hub'
-import type { Activity, Option, Proposal, Service } from '../hub'
+import type { FormEvent } from 'react'
+import { api, bookingStatusLabel, formatINR, formatWhen, paymentLabel, paymentMethodLabel, serviceNames, serviceTypeOf } from '../hub'
+import type { Activity, HubState, MenuItem, Quote, QuoteResult, Service } from '../hub'
 import { newId } from '../id'
 import { BackIcon, CheckIcon } from '../icons'
-import VoiceInput from '../VoiceInput'
-import OptionCard from '../components/OptionCard'
+import PriceLines from '../components/PriceLines'
 import ProviderBadge from '../components/ProviderBadge'
 import type { Hub } from './hubType'
 
-type Channel = 'app' | 'message' | 'voice'
-type Step = 'form' | 'options' | 'review' | 'done'
-const nouns: Record<Service, string> = { ride: 'ride', food: 'order', medicine: 'request' }
+type Step = 'form' | 'choose' | 'review' | 'done'
+const clock = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' })
+const MAX_QUANTITY = 5
+
+function Stepper({ item, value, onChange }: { item: MenuItem; value: number; onChange: (next: number) => void }) {
+  return (
+    <div className="stepper-control" role="group" aria-label={`How many: ${item.name}`}>
+      <button type="button" className="secondary small" aria-label={`Fewer: ${item.name}`} disabled={value === 0} onClick={() => onChange(value - 1)}>−</button>
+      <output aria-live="polite">{value}</output>
+      <button type="button" className="secondary small" aria-label={`More: ${item.name}`} disabled={value === MAX_QUANTITY} onClick={() => onChange(value + 1)}>+</button>
+    </div>
+  )
+}
+
+function Menu({ items, counts, onChange }: { items: MenuItem[]; counts: Record<string, number>; onChange: (id: string, value: number) => void }) {
+  return (
+    <ul className="menu-list">
+      {items.map((item) => (
+        <li key={item.id} className="menu-row">
+          <div>
+            <strong>{item.name}</strong>
+            <small className="muted">
+              {formatINR(item.price_minor)}
+              {item.vegetarian === undefined ? '' : item.vegetarian ? ' · vegetarian' : ' · non-vegetarian'}
+              {item.mild === undefined ? '' : item.mild ? ', mild' : ', some spice'}
+            </small>
+          </div>
+          <Stepper item={item} value={counts[item.id] ?? 0} onChange={(value) => onChange(item.id, value)} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const optionLabel = (quote: Quote) => (quote.service === 'ride' && quote.app_name ? `${quote.option_name} from ${quote.app_name}` : quote.title)
 
 export default function RequestScreen({ hub, service, proposalId, simple = false }: { hub: Hub; service: Service; proposalId?: string; simple?: boolean }) {
-  const { state, busy, run, refresh } = hub
+  const { state, busy, run, refresh, setState } = hub
   const profile = state.profile
-  const [handedOver] = useState(() => state.requests.find((item) => item.id === proposalId && item.service === service && item.status === 'proposed' && item.expires_at * 1000 > Date.now()) ?? null)
-  const [engine, setEngine] = useState<'offline' | 'gemini'>('offline')
-  const [channel, setChannel] = useState<Channel>(handedOver?.channel === 'voice' ? 'voice' : 'app')
-  const [message, setMessage] = useState(handedOver?.input?.message ?? '')
-  const [destination, setDestination] = useState(handedOver?.input?.destination ?? '')
-  const [medicine, setMedicine] = useState('')
-  const [budget, setBudget] = useState('')
-  const [proposal, setProposal] = useState<Proposal | null>(handedOver)
-  const [selection, setSelection] = useState<Option | null>(null)
+  const serviceType = serviceTypeOf[service]
+  const provider = state.services?.find((item) => item.service_type === serviceType)
+  const places = state.places ?? []
+  const [handedOver] = useState(() => (state.quotes ?? []).filter((q) => q.request_id === proposalId && q.service === service && q.status === 'ACTIVE'))
+  const [quotes, setQuotes] = useState<Quote[]>(handedOver)
+  const [selected, setSelected] = useState<Quote | null>(handedOver.length === 1 ? handedOver[0] : null)
   const [receipt, setReceipt] = useState<Activity | null>(null)
-  const [now] = useState(() => Date.now())
-  const requestKey = useRef(newId())
+  const [pickupId, setPickupId] = useState(() => places.find((p) => p.is_default_pickup)?.id ?? places[0]?.id ?? '')
+  const [destinationId, setDestinationId] = useState('')
+  const [destinationText, setDestinationText] = useState('')
+  const kitchens = (provider?.catalogue.kitchens ?? []).filter((kitchen) => kitchen.enabled)
+  const [kitchenId, setKitchenId] = useState(kitchens[0]?.id ?? '')
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [now] = useState(() => Date.now() / 1000)
+  const keys = useRef<Record<string, string>>({})
   const heading = useRef<HTMLHeadingElement>(null)
   const firstRender = useRef(true)
 
-  const step: Step = receipt ? 'done' : selection && proposal ? 'review' : proposal ? 'options' : 'form'
+  const step: Step = receipt ? 'done' : selected ? 'review' : quotes.length ? 'choose' : 'form'
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
     heading.current?.focus()
   }, [step])
 
-  const apps = state.catalogue.filter((app) => app.service === service && profile.enabled_providers.includes(app.id))
-  const unfinished = [...state.requests].reverse().find((item) => item.service === service && item.status === 'proposed' && item.expires_at * 1000 > now)
-
-  function changeRequest() { requestKey.current = newId(); setProposal(null); setSelection(null); setReceipt(null) }
-  function startAgain() { changeRequest(); setMessage(''); setDestination(''); setBudget('') }
-
-  function readAloud(text: string) {
+  function speak(text: string) {
     if (!('speechSynthesis' in window)) { hub.notify('Read aloud is unavailable in this browser.'); return }
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = profile.language
     window.speechSynthesis.speak(utterance)
   }
+  const spoken = selected ? `${selected.title}. ${formatINR(selected.amount_minor)}. ${selected.notice} ${paymentMethodLabel[selected.payment_method]}.` : ''
+  useEffect(() => {
+    if (profile.read_aloud && spoken && 'speechSynthesis' in window) speak(spoken)
+    // Read each new quote once when it opens, only if the person asked for read-aloud.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spoken])
 
-  function submit() {
+  function startAgain() { setQuotes([]); setSelected(null); setReceipt(null); setCounts({}) }
+
+  function getQuotes(event: FormEvent) {
+    event.preventDefault()
+    const items = Object.entries(counts).filter(([, quantity]) => quantity > 0).map(([item_id, quantity]) => ({ item_id, quantity }))
+    const body = service === 'ride'
+      ? { service_type: 'RIDE', pickup_place_id: pickupId || null, ...(destinationId === 'other' ? { destination_text: destinationText } : { destination_place_id: destinationId }) }
+      : service === 'food' ? { service_type: 'FOOD', option_id: kitchenId, items } : { service_type: 'PHARMACY', items }
     void run(async () => {
-      setSelection(null)
-      const result = engine === 'gemini'
-        ? await api<Proposal>('/assistant', 'POST', { id: requestKey.current, channel, message })
-        : await api<Proposal>('/requests', 'POST', {
-            id: requestKey.current, service, channel, message, destination,
-            medicine: medicine || profile.medicines[0] || '', budget: budget === '' ? null : Number(budget),
-          })
-      setProposal(result)
+      const result = await api<QuoteResult>('/quotes', 'POST', body)
+      setQuotes(result.quotes)
+      setSelected(result.quotes.length === 1 ? result.quotes[0] : null)
       await refresh()
     })
   }
 
   function confirm() {
-    if (!selection || !proposal) return
+    if (!selected) return
+    // One key per quote: a double tap or a retry after a lost reply cannot book twice.
+    const key = (keys.current[selected.id] ??= newId())
     void run(async () => {
-      const order = await api<Activity>(`/requests/${proposal.id}/confirm`, 'POST', { option_id: selection.id, confirmed: true })
-      setReceipt(order); setSelection(null); setProposal(null)
-      requestKey.current = newId()
+      setReceipt(await api<Activity>(`/quotes/${selected.id}/confirm`, 'POST', { idempotency_key: key, confirmed: true }))
       await refresh()
     })
   }
 
-  const needsApproval = selection && proposal ? profile.caregiver_enabled && (selection.price > profile.approval_limit || proposal.service === 'medicine') : false
-  const appointment = proposal?.appointment_id ? state.appointments?.find((a) => a.id === proposal.appointment_id) : undefined
-  const receiptAppointment = receipt?.appointment_id ? state.appointments?.find((a) => a.id === receipt.appointment_id) : undefined
-  const noteLabel = engine === 'gemini' ? 'Tell Saathi what you need' : channel === 'message' ? 'Your message (local preview, no message is sent)' : 'Anything else we should know? (optional)'
+  const connect = () => void run(async () => { setState(await api<HubState>(`/services/${serviceType}/connect-demo`, 'POST', { consent: true })) })
+  const appointmentId = (selected ?? quotes[0])?.appointment_id
+  const appointment = appointmentId ? state.appointments?.find((a) => a.id === appointmentId) : undefined
+  const unfinished = (state.quotes ?? []).filter((q) => q.service === service && q.status === 'ACTIVE' && q.expires_at > now)
+  const lastGroup = unfinished.length ? unfinished.filter((q) => q.request_id === unfinished.at(-1)!.request_id) : []
+  const chosenItems = Object.values(counts).reduce((sum, quantity) => sum + quantity, 0)
+  const expired = selected ? selected.expires_at <= now : false
 
   return (
     <>
       <a className="back" href="#/"><BackIcon /> Home</a>
       <h1 className="page-title">{serviceNames[service]}</h1>
 
-      {step === 'form' ? (
+      {step === 'form' && provider && provider.status !== 'CONNECTED' ? (
+        <section className="card" aria-labelledby="connect-title">
+          <h2 id="connect-title" className="step-title">Connect the {provider.provider_label} first</h2>
+          <p>{provider.notice} Connect it to get sample prices here. There is no sign-in and nothing real is booked.</p>
+          <button type="button" className="primary wide" disabled={busy} onClick={connect}>Connect {provider.provider_label}</button>
+          <a className="secondary wide" href="#/services">Open Services</a>
+        </section>
+      ) : null}
+
+      {step === 'form' && (!provider || provider.status === 'CONNECTED') ? (
         <section className="card" aria-labelledby="form-title">
           <h2 id="form-title" tabIndex={-1} ref={heading} className={simple ? 'sr-only' : 'step-title'}>What would you like?</h2>
-          {simple ? null : (
-            <p className="muted apps-line">
-              {apps.length ? <>Saathi will compare: <strong>{apps.map((app) => app.name).join(', ')}</strong> (demo apps). </> : <>No app is turned on for this. </>}
-              <a href="#/services">Change in Services</a>
-            </p>
-          )}
-          {unfinished && !simple ? <button className="secondary wide" onClick={() => setProposal(unfinished)}>Continue your unfinished request</button> : null}
-          <form onSubmit={(event) => { event.preventDefault(); submit() }}>
-            {engine === 'offline' && service === 'ride' ? (
-              <label className="field"><span>Where to?</span>
-                <input required maxLength={150} value={destination} placeholder="e.g. Dr Mehta's clinic" onChange={(event) => { setDestination(event.target.value); changeRequest() }} />
-              </label>
-            ) : null}
-            {engine === 'offline' && service === 'medicine' ? (
-              <label className="field"><span>Saved medicine</span>
-                <select value={medicine || profile.medicines[0] || ''} onChange={(event) => { setMedicine(event.target.value); changeRequest() }}>
-                  {profile.medicines.length ? profile.medicines.map((name) => <option key={name}>{name}</option>) : <option value="">Add a label in your profile</option>}
-                </select>
-              </label>
-            ) : null}
-            {simple ? null : (
+          {simple ? null : <p className="muted">Prices come from the {provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.</p>}
+          {lastGroup.length ? <button type="button" className="secondary wide" onClick={() => { setQuotes(lastGroup); setSelected(lastGroup.length === 1 ? lastGroup[0] : null) }}>Continue where you left off</button> : null}
+          {service === 'ride' && !places.length ? (
+            <p className="clarify">Add your home in setup first, so Saathi knows where to pick you up. <a href="#/onboarding/places">Add a place</a></p>
+          ) : null}
+          <form onSubmit={getQuotes}>
+            {service === 'ride' ? (
               <>
-                <label className="field"><span>{noteLabel}</span>
-                  <textarea required={engine === 'gemini'} minLength={engine === 'gemini' ? 3 : undefined} rows={3} maxLength={1000} value={message}
-                    placeholder={service === 'food' ? 'e.g. Something light, no spice' : 'Tell us what would make your day easier…'}
-                    onChange={(event) => { setMessage(event.target.value); changeRequest() }} />
+                <label className="field"><span>Pick me up from</span>
+                  <select required value={pickupId} onChange={(event) => setPickupId(event.target.value)}>
+                    {places.map((place) => <option key={place.id} value={place.id}>{place.label}</option>)}
+                  </select>
                 </label>
-                <VoiceInput language={profile.language} disabled={busy} onText={(text) => { setMessage(text); setChannel('voice'); changeRequest() }} />
-                <details className="more">
-                  <summary>More options</summary>
-                  <label className="field"><span>Budget (₹)</span>
-                    <input type="number" inputMode="numeric" min={0} max={10000} placeholder={String(profile.budget)} value={budget} onChange={(event) => { setBudget(event.target.value); changeRequest() }} />
+                <label className="field"><span>Where to?</span>
+                  <select required value={destinationId} onChange={(event) => setDestinationId(event.target.value)}>
+                    <option value="">Choose a place</option>
+                    {places.filter((place) => place.id !== pickupId).map((place) => <option key={place.id} value={place.id}>{place.label}</option>)}
+                    <option value="other">Somewhere else…</option>
+                  </select>
+                </label>
+                {destinationId === 'other' ? (
+                  <label className="field"><span>Place name or address</span>
+                    <input required maxLength={150} value={destinationText} placeholder="e.g. Central market" onChange={(event) => setDestinationText(event.target.value)} />
                   </label>
-                  <label className="field"><span>Assistant mode</span>
-                    <select value={engine} onChange={(event) => { setEngine(event.target.value as 'offline' | 'gemini'); changeRequest() }}>
-                      <option value="offline">Offline demo (no AI)</option>
-                      <option value="gemini">Gemini (requires configuration)</option>
-                    </select>
-                  </label>
-                  <label className="field"><span>How are you asking?</span>
-                    <select value={channel} onChange={(event) => { setChannel(event.target.value as Channel); changeRequest() }}>
-                      <option value="app">App</option>
-                      <option value="message">Message preview</option>
-                      <option value="voice">Voice in this browser</option>
-                    </select>
-                  </label>
-                  <p className="muted">{engine === 'offline' ? 'Offline demo uses your answers and saved preferences, not AI.' : 'Gemini drafts a request from your words. Live testing is deferred.'}</p>
-                </details>
+                ) : null}
               </>
-            )}
-            <button className="primary wide" disabled={busy}>Show options</button>
-            {simple ? null : (
-              <p className="muted prefs">
-                {service === 'food' ? `${profile.vegetarian ? 'Vegetarian' : 'Any diet'} · ${profile.mild ? 'Mild spice' : 'Any spice'} · up to ₹${profile.budget}` : service === 'ride' ? `Pickup: ${profile.home}` : 'Request only. No medical advice.'}
-              </p>
-            )}
+            ) : null}
+            {service === 'food' ? (
+              kitchens.length ? (
+                <>
+                  <label className="field"><span>Kitchen</span>
+                    <select value={kitchenId} onChange={(event) => { setKitchenId(event.target.value); setCounts({}) }}>
+                      {kitchens.map((kitchen) => <option key={kitchen.id} value={kitchen.id}>{kitchen.name} · listed on {kitchen.app_name} (demo)</option>)}
+                    </select>
+                  </label>
+                  <Menu items={kitchens.find((k) => k.id === kitchenId)?.items ?? []} counts={counts} onChange={(id, value) => setCounts({ ...counts, [id]: value })} />
+                  {simple ? null : <p className="muted">Fictional demo kitchens. Your usual choice: {profile.vegetarian ? 'vegetarian' : 'any diet'}, {profile.mild ? 'mild' : 'any spice'}, up to ₹{profile.budget}.</p>}
+                </>
+              ) : <p className="clarify">Switch on a food option in <a href="#/services">Services</a> first.</p>
+            ) : null}
+            {service === 'medicine' ? (
+              <>
+                <p className="inline-note">Sample non-prescription items only. This is not medical advice and not a real pharmacy order.</p>
+                <Menu items={provider?.catalogue.items ?? []} counts={counts} onChange={(id, value) => setCounts({ ...counts, [id]: value })} />
+              </>
+            ) : null}
+            <button className="primary wide" disabled={busy || (service !== 'ride' && !chosenItems) || (service === 'ride' && !places.length)}>
+              {service === 'ride' ? 'Get demo prices' : 'Get demo price'}
+            </button>
           </form>
         </section>
       ) : null}
 
-      {step === 'options' && proposal ? (
+      {step === 'choose' ? (
         <section className="results" aria-labelledby="results-title" aria-live="polite">
-          <div className="section-row">
-            <h2 id="results-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Pick one' : proposal.summary}</h2>
-            {simple ? null : <button className="secondary small" onClick={() => readAloud(proposal.clarification || proposal.summary)}>Read aloud</button>}
-          </div>
-          {proposal.input?.message ? <p className="heard">You asked: “{proposal.input.message}”</p> : null}
+          <h2 id="results-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Pick one' : `${quotes.length} demo prices`}</h2>
           {appointment ? <p className="inline-note appointment-note">For your appointment: <strong>{appointment.title}</strong>, {formatWhen(appointment.starts_at)}, at {appointment.place}.</p> : null}
-          {proposal.clarification ? (
-            <p className="clarify">{proposal.clarification} {proposal.clarification.startsWith('Turn on') ? <a href="#/services">Open Services</a> : null}</p>
-          ) : simple ? null : (
-            <p className="muted">Pick the one you like. You review it before anything is booked. Options expire after 15 minutes.</p>
-          )}
+          {simple ? null : <p className="muted">Pick one to see the full price. Nothing is booked until you confirm, and prices are held for 15 minutes.</p>}
           <div className="options">
-            {proposal.options.map((option) => (
-              <OptionCard key={option.id} option={option} service={proposal.service} busy={busy} simple={simple} onChoose={() => setSelection(option)} />
+            {quotes.map((quote) => (
+              <article key={quote.id} className="option card">
+                <ProviderBadge id={quote.app_id ?? quote.provider_type} name={quote.app_name ?? quote.provider_label} />
+                <h3>{service === 'ride' ? quote.option_name : quote.title}</h3>
+                {simple ? null : <p className="muted">Simulated by the {quote.provider_label}</p>}
+                <div className="option-foot">
+                  <div>
+                    <strong className="price">{formatINR(quote.amount_minor)}</strong>
+                    {quote.pickup_eta_min ? <span className="eta">{quote.pickup_eta_min} min away</span> : quote.delivery_min ? <span className="eta">About {quote.delivery_min} min</span> : null}
+                  </div>
+                  <button type="button" className="secondary" disabled={busy} aria-label={`Choose ${optionLabel(quote)}`} onClick={() => setSelected(quote)}>Choose</button>
+                </div>
+              </article>
             ))}
           </div>
-          <button className="secondary wide" disabled={busy} onClick={() => setProposal(null)}>{simple ? 'Back' : 'Change my request'}</button>
+          <button type="button" className="secondary wide" disabled={busy} onClick={startAgain}>{simple ? 'Back' : 'Change my request'}</button>
         </section>
       ) : null}
 
-      {step === 'review' && selection && proposal ? (
+      {step === 'review' && selected ? (
         <section className="review card" aria-labelledby="review-title">
           {simple ? null : <p className="eyebrow">YOU HAVE THE FINAL SAY</p>}
-          <h2 id="review-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Book this?' : 'Review your request'}</h2>
-          {selection.provider && selection.provider_name ? <ProviderBadge id={selection.provider} name={selection.provider_name} /> : null}
-          <p className="review-name">{selection.name}</p>
-          <p className="review-price">₹{selection.price}</p>
-          {simple ? null : <p className="muted">{selection.detail}</p>}
-          {selection.eta_min ? <p>{waitText(proposal.service, selection.eta_min)}</p> : null}
-          {simple ? <p className="muted">Demo only. Nothing is really booked or paid.</p> : (
-            <p>
-              {selection.provider_name ? `Saathi will book this with ${selection.provider_name} for you. ` : 'Saathi will save this request for you. '}
-              This is a simulated booking: no real {nouns[proposal.service]} is placed and nothing is charged.
-            </p>
-          )}
-          {needsApproval ? <p className="inline-note">Someone in your Care Circle must approve this first.</p> : null}
-          <button className="primary wide" disabled={busy} onClick={confirm}>{selection.provider_name ? `Book with ${selection.provider_name}` : 'Confirm request'}</button>
-          <button className="secondary wide" disabled={busy} onClick={() => setSelection(null)}>Go back</button>
-        </section>
-      ) : null}
-
-      {step === 'done' && receipt && receipt.status === 'failed' ? (
-        <section className="receipt card failed" aria-labelledby="receipt-title">
-          <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">Booking failed</h2>
-          <p className="lead">{receipt.option.provider_name ?? 'The app'} could not take this booking. Nothing was booked and nothing was charged.</p>
-          <p className="muted">This is a simulated failure, so the demo can show what happens when a service fails.</p>
-          <button className="primary wide" onClick={startAgain}>Try again</button>
-          <button className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'help', note: `A booking failed: ${receipt.option.name}` }); hub.notify('Your Care Circle was told.') })}>Ask my Care Circle for help</button>
-        </section>
-      ) : null}
-
-      {step === 'done' && receipt && receipt.status !== 'failed' ? (
-        <section className="receipt card" aria-labelledby="receipt-title">
-          <span className="receipt-check"><CheckIcon /></span>
-          <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">{receipt.status === 'awaiting_approval' ? 'Sent for approval' : simple ? 'Booked' : 'All done'}</h2>
-          {simple ? null : (
-            <p className="lead">
-              {receipt.status === 'awaiting_approval'
-                ? 'Someone in your Care Circle will be asked to approve this before Saathi books it.'
-                : `Saathi booked ${receipt.option.name}${receipt.option.provider_name ? ` with ${receipt.option.provider_name}` : ''} for you.`}
-            </p>
-          )}
+          <h2 id="review-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Book this?' : 'Check and confirm'}</h2>
+          <ProviderBadge id={selected.app_id ?? selected.provider_type} name={selected.app_name ?? selected.provider_label} />
+          <p className="review-name">{selected.title}</p>
+          {selected.details?.pickup && selected.details.destination ? <p>{selected.details.pickup.label} → {selected.details.destination.label}</p> : null}
+          {appointment ? <p className="inline-note appointment-note">For your appointment: <strong>{appointment.title}</strong>, {formatWhen(appointment.starts_at)}.</p> : null}
+          <p className="review-price">{formatINR(selected.amount_minor)}</p>
+          {simple ? null : <PriceLines lines={selected.line_items ?? []} total={selected.amount_minor} />}
           <dl className="receipt-details">
-            {receipt.option.provider_name ? <div><dt>App</dt><dd>{receipt.option.provider_name} (demo)</dd></div> : null}
-            <div><dt>Price</dt><dd>₹{receipt.option.price}</dd></div>
-            {receipt.option.eta_min ? <div><dt>Time</dt><dd>{waitText(receipt.service, receipt.option.eta_min)}</dd></div> : null}
-            {receipt.payment ? <div><dt>Payment</dt><dd>{paymentLabel[receipt.payment.status]}</dd></div> : null}
-            {receipt.reference && !simple ? <div><dt>Reference</dt><dd>{receipt.reference}</dd></div> : null}
+            {selected.pickup_eta_min ? <div><dt>Pickup</dt><dd>About {selected.pickup_eta_min} min (estimate)</dd></div> : null}
+            {selected.duration_min ? <div><dt>Trip time</dt><dd>About {selected.duration_min} min</dd></div> : null}
+            {selected.delivery_min ? <div><dt>Delivery</dt><dd>About {selected.delivery_min} min</dd></div> : null}
+            <div><dt>Provider</dt><dd>{selected.provider_label} (simulated)</dd></div>
+            <div><dt>Payment</dt><dd>{paymentMethodLabel[selected.payment_method]} · no money will be charged</dd></div>
+            {simple ? null : <div><dt>Price held until</dt><dd>{clock.format(new Date(selected.expires_at * 1000))}</dd></div>}
           </dl>
-          {receiptAppointment && receipt.status === 'simulated_confirmed' && !simple ? (
-            <div className="suggestion">
-              <p><strong>Suggestion:</strong> would you like to ask someone in your Care Circle whether they can come to {receiptAppointment.title} with you? Nobody is asked unless you choose to.</p>
-              <button className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'accompany', appointment_id: receiptAppointment.id }); hub.notify('Your Care Circle was asked. Nobody has agreed yet.') })}>Ask if someone can come with me</button>
-            </div>
-          ) : null}
-          {simple ? (
-            <>
-              <p className="muted">Demo only. Nothing was really booked or paid.</p>
-              <a className="primary wide" href="#/">Done</a>
-            </>
-          ) : (
-            <>
-              <p className="muted">Simulated booking. No real {nouns[receipt.service]} was placed and nothing was charged.</p>
-              <p className="reassure">{receipt.status === 'awaiting_approval' ? 'No need to call anyone.' : 'That is it. There was no need to call anyone.'}</p>
-              <a className="primary wide" href="#/activity">See my activity</a>
-              <button className="secondary wide" onClick={startAgain}>Book something else</button>
-            </>
-          )}
+          <p className="simulation-warning">{selected.notice}</p>
+          {selected.approval.required ? <p className="inline-note">Someone in your Care Circle must approve this first. {selected.approval.reason}</p> : null}
+          {expired ? <p className="inline-note">This price has expired. Please get a new one.</p> : null}
+          <button type="button" className="primary wide" disabled={busy || expired} onClick={confirm}>Confirm demo booking</button>
+          <button type="button" className="secondary wide" disabled={busy} onClick={() => (quotes.length > 1 ? setSelected(null) : startAgain())}>Go back</button>
+          {simple ? null : <button type="button" className="secondary wide" onClick={() => speak(spoken)}>Read aloud</button>}
         </section>
       ) : null}
+
+      {step === 'done' && receipt ? <Receipt hub={hub} receipt={receipt} simple={simple} onAgain={startAgain} /> : null}
     </>
+  )
+}
+
+function Receipt({ hub, receipt, simple, onAgain }: { hub: Hub; receipt: Activity; simple: boolean; onAgain: () => void }) {
+  const { state, busy, run } = hub
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { heading.current?.focus() }, [])
+  const appointment = receipt.appointment_id ? state.appointments?.find((a) => a.id === receipt.appointment_id) : undefined
+  const status = receipt.booking_status
+  const payment = receipt.payment!
+
+  if (status === 'FAILED') {
+    return (
+      <section className="receipt card failed" aria-labelledby="receipt-title">
+        <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">Booking failed</h2>
+        <p className="lead">The {receipt.provider_label} could not take this booking. Nothing was booked and nothing was charged.</p>
+        <dl className="receipt-details">
+          <div><dt>Booking</dt><dd>{bookingStatusLabel[status]}</dd></div>
+          <div><dt>Payment</dt><dd>{paymentLabel[payment.status]}</dd></div>
+        </dl>
+        <p className="muted">This is a simulated failure, so the demo can show what happens when a service fails.</p>
+        <button type="button" className="primary wide" onClick={onAgain}>Try again</button>
+        {state.profile.offer_help !== false ? (
+          <button type="button" className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'help', note: `A booking failed: ${receipt.title}` }); hub.notify('Your Care Circle was told.') })}>Ask my Care Circle for help</button>
+        ) : null}
+      </section>
+    )
+  }
+
+  const waiting = status === 'AWAITING_APPROVAL'
+  return (
+    <section className="receipt card" aria-labelledby="receipt-title">
+      <span className="receipt-check"><CheckIcon /></span>
+      <h2 id="receipt-title" tabIndex={-1} ref={heading} className="step-title">{waiting ? 'Sent for approval' : 'Demo booking confirmed'}</h2>
+      <p className="lead">
+        {waiting
+          ? 'Someone in your Care Circle will be asked to approve this. Nothing is booked or charged until they do.'
+          : `Saathi booked ${receipt.title} with the ${receipt.provider_label} (simulated).`}
+      </p>
+      <dl className="receipt-details">
+        {receipt.provider_booking_id ? <div><dt>Booking reference</dt><dd>{receipt.provider_booking_id}</dd></div> : null}
+        <div><dt>Booking</dt><dd>{bookingStatusLabel[status]}</dd></div>
+        <div><dt>Payment</dt><dd>{paymentLabel[payment.status]}</dd></div>
+        <div><dt>Total</dt><dd>{formatINR(receipt.amount_minor)}</dd></div>
+        {receipt.pickup_eta_min && !waiting ? <div><dt>Pickup</dt><dd>About {receipt.pickup_eta_min} min (estimate)</dd></div> : null}
+      </dl>
+      <p className="simulation-warning">{payment.status === 'SUCCEEDED_SIMULATED' ? 'No money charged.' : 'Nothing charged.'} {receipt.notice}</p>
+      {simple ? null : (
+        <details className="more">
+          <summary>Demo details</summary>
+          <dl className="receipt-details codes">
+            <div><dt>Booking status</dt><dd><code>{status}</code></dd></div>
+            <div><dt>Payment status</dt><dd><code>{payment.status}</code></dd></div>
+          </dl>
+        </details>
+      )}
+      {appointment && status === 'CONFIRMED_SIMULATED' && !simple ? (
+        <div className="suggestion">
+          <p><strong>Suggestion:</strong> would you like to ask someone in your Care Circle whether they can come to {appointment.title} with you? Nobody is asked unless you choose to.</p>
+          <button type="button" className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/help', 'POST', { kind: 'accompany', appointment_id: appointment.id }); hub.notify('Your Care Circle was asked. Nobody has agreed yet.') })}>Ask if someone can come with me</button>
+        </div>
+      ) : null}
+      {simple ? <a className="primary wide" href="#/">Done</a> : (
+        <>
+          <p className="reassure">{waiting ? 'No need to call anyone.' : 'That is it. There was no need to call anyone.'}</p>
+          <a className="primary wide" href={`#/activity/${receipt.id}`}>See booking details</a>
+          <button type="button" className="secondary wide" onClick={onAgain}>Book something else</button>
+        </>
+      )}
+    </section>
   )
 }

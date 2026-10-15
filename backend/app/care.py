@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from app.domain import SCHEMA
+from app.hub_store import initial_state
 from app.onboarding import ensure_setup
 
 PERMISSIONS = {
@@ -39,21 +41,13 @@ ROLE_NAMES = {
     "administrator": "Administrator",
 }
 
-BOOKING_STATUSES = {
-    "awaiting_approval",
-    "simulated_confirmed",
-    "completed",
-    "failed",
-    "cancelled",
-    "rejected",
-}
-NOT_CHARGED = "not_charged_simulated"
-PENDING = "pending_simulated"
-PAID = "succeeded_simulated"
-
 
 def ensure(state):
-    """Fill in Care Circle fields for accounts created before they existed."""
+    """Fill in missing fields. Demo data saved by an older version is cleared, not guessed at."""
+    if state.get("schema") != SCHEMA:
+        # Anonymous 24-hour demo sessions only: starting again is safer than a half-migration.
+        state.clear()
+        state.update(initial_state())
     ensure_setup(state)
     state.setdefault("care_circle", [])
     state.setdefault("events", [])
@@ -66,13 +60,6 @@ def ensure(state):
     state["profile"].setdefault(
         "sharing", {"ride": True, "food": True, "medicine": True, "appointments": True}
     )
-    for item in state["activity"]:
-        item.setdefault("shared", True)
-        item.setdefault("payment", payment(item["option"]["price"], NOT_CHARGED))
-        item.setdefault("decision", None)
-        item.setdefault("questions", [])
-        item.setdefault("approval_reason", "")
-        item.setdefault("failure", "")
     return state
 
 
@@ -117,10 +104,6 @@ def need(who, permission):
         raise HTTPException(403, f"Not shared with you: {PERMISSIONS[permission].lower()}.")
 
 
-def payment(amount, status):
-    return {"method": "pay_on_completion", "status": status, "amount": amount, "simulated": True}
-
-
 def add_event(
     state,
     kind,
@@ -154,7 +137,10 @@ def add_event(
 
 
 def _activity(state, ref):
-    return next((a for a in state["activity"] if a["id"] == ref), None)
+    # A conversation points at the request; events and appointments point at the booking.
+    if not ref:
+        return None
+    return next((a for a in state["activity"] if ref in (a["id"], a.get("request_id"))), None)
 
 
 def _shared(state, ref):
@@ -186,13 +172,14 @@ def reminder_view(reminder, now=None):
 
 
 BOOKING_LINES = {
-    "simulated_confirmed": "Booked {name} with {app} (simulated). Nothing charged yet.",
-    "completed": "{name} with {app} completed (simulated).",
-    "awaiting_approval": "Sent {name} with {app} for approval.",
-    "failed": "Booking {name} with {app} failed. Nothing was booked or charged.",
-    "cancelled": "Cancelled {name}. Nothing was charged.",
-    "rejected": "{name} was declined in the Care Circle.",
+    "CONFIRMED_SIMULATED": "Booked {name} with the {app} (simulated).",
+    "COMPLETED_SIMULATED": "{name} with the {app} completed (simulated).",
+    "AWAITING_APPROVAL": "Sent {name} for approval. Nothing is booked yet.",
+    "FAILED": "Booking {name} failed. Nothing was booked or charged.",
+    "CANCELLED_SIMULATED": "Cancelled {name}.",
+    "DECLINED": "{name} was declined in the Care Circle. Nothing was booked.",
 }
+PHARMACY_HIDDEN = "Pharmacy order (details not shared)"
 
 
 def summarise(conv, state, perms=None):
@@ -211,26 +198,24 @@ def summarise(conv, state, perms=None):
     elif conv.get("service") == "food":
         text = "Asked for a meal."
     elif conv.get("service") == "medicine":
-        text = (
-            "Asked for a medicine reorder."
-            if hide_medicine
-            else (f"Asked to reorder {conv.get('medicine') or 'a saved medicine'}.")
-        )
+        text = "Asked for pharmacy items."
     else:
         text = "Asked Saathi for help."
     confirmed = []
     if item:
-        name = "the medicine request" if hide_medicine else item["option"]["name"]
-        app = item["option"].get("provider_name") or "Saathi"
-        confirmed.append(BOOKING_LINES[item["status"]].format(name=name, app=app))
+        name = "the pharmacy order" if hide_medicine else item["title"]
+        line = BOOKING_LINES[item["booking_status"]]
+        confirmed.append(line.format(name=name, app=item["provider_label"]))
     elif conv.get("options"):
-        text += f" {conv['options']} options were shown; nothing was booked."
+        shown = conv["options"]
+        text += f" {shown} quote{'s were' if shown > 1 else ' was'} shown; nothing was booked."
     elif not conv.get("safety"):
         text += " Saathi asked for more details; nothing was booked."
     suggestions = []
-    if item and item.get("appointment_id") and item["status"] == "simulated_confirmed":
+    status = item["booking_status"] if item else None
+    if item and item.get("appointment_id") and status == "CONFIRMED_SIMULATED":
         suggestions.append("Ask whether someone could go along to the appointment.")
-    if item and item["status"] == "failed":
+    if status == "FAILED":
         suggestions.append("Try again, or offer help from the Care Circle.")
     if conv.get("safety") == "suspected_scam":
         suggestions.append("Check in before anyone replies to that message.")
@@ -260,43 +245,60 @@ def conversation_view(conv, state, perms=None):
         key: conv.get(key)
         for key in ("id", "channel", "at", "service", "request_id", "safety", "seeded")
     }
-    view["status"] = item["status"] if item else "no_booking"
+    view["status"] = item["booking_status"] if item else "no_booking"
     view["summary"] = summarise(conv, state, perms)
     if perms is None:
         view["transcript"] = conv["transcript"]
     return view
 
 
+CIRCLE_FIELDS = (
+    "id",
+    "request_id",
+    "service",
+    "service_type",
+    "channel",
+    "booking_status",
+    "provider_type",
+    "provider_label",
+    "provider_booking_id",
+    "app_name",
+    "option_name",
+    "amount_minor",
+    "currency",
+    "pickup_eta_min",
+    "duration_min",
+    "delivery_min",
+    "notice",
+    "simulated",
+    "appointment_id",
+    "approval_reason",
+    "decision",
+    "questions",
+    "failure",
+    "shared",
+    "created_at",
+    "updated_at",
+)
+
+
 def activity_for_circle(item, perms):
-    """What a caretaker may see of one booking."""
-    option = item["option"]
-    medicine_hidden = item["service"] == "medicine" and "view_medication" not in perms
-    view = {
-        key: item.get(key)
-        for key in (
-            "id",
-            "service",
-            "channel",
-            "status",
-            "created_at",
-            "reference",
-            "simulated",
-            "appointment_id",
-            "approval_reason",
-            "decision",
-            "questions",
-        )
-    }
-    view["option"] = {
-        "id": option["id"],
-        "name": "Medicine request (details not shared)" if medicine_hidden else option["name"],
-        "price": option["price"],
-        "detail": "" if medicine_hidden else option.get("detail", ""),
-        "provider": option.get("provider"),
-        "provider_name": option.get("provider_name"),
-        "eta_min": option.get("eta_min"),
-        "simulated": True,
-    }
+    """What a caretaker may see of one booking: never addresses, and payment only if shared."""
+    view = {key: item.get(key) for key in CIRCLE_FIELDS}
+    details = item.get("details", {})
+    if item["service_type"] == "PHARMACY" and "view_medication" not in perms:
+        view.update(title=PHARMACY_HIDDEN, details={}, line_items=[])
+    else:
+        view["title"] = item["title"]
+        view["line_items"] = item.get("line_items", [])
+        if item["service_type"] == "RIDE":
+            view["details"] = {
+                "pickup": {"label": details["pickup"]["label"]},
+                "destination": {"label": details["destination"]["label"]},
+                "distance_km": details.get("distance_km"),
+            }
+        else:
+            view["details"] = {key: details[key] for key in ("kitchen", "items") if key in details}
     if "view_payments" in perms:
         view["payment"] = item.get("payment")
     return view
@@ -319,7 +321,7 @@ def circle_view(state, grant, *, storage, catalogue):
         approvals = [
             activity_for_circle(item, perms | {"view_medication"})
             for item in state["activity"]
-            if item["status"] == "awaiting_approval"
+            if item["booking_status"] == "AWAITING_APPROVAL"
         ]
     see_plans = "view_activity" in perms and sharing.get("appointments", True)
     see_reminders = see_plans or "manage_reminders" in perms
