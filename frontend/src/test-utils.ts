@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { CareState, CatalogueApp, HubState } from './hub'
+import type { CareState, CatalogueApp, ConnectionStatus, DemoService, HubState, Place, Progress, StepId } from './hub'
 
 export const catalogue: CatalogueApp[] = [
   { id: 'uber', name: 'Uber', service: 'ride', blurb: 'Cabs', simulated: true },
@@ -16,14 +16,73 @@ export function makeState(overrides: Partial<HubState> = {}): HubState {
     profile: {
       name: 'Friend', language: 'en-IN', large_text: false, high_contrast: false, simple: false, vegetarian: true, mild: true, budget: 200,
       home: 'Demo home', caregiver_name: '', approval_limit: 150, caregiver_enabled: false, medicines: ['Saved medicine A'],
-      enabled_providers: catalogue.map((app) => app.id),
+      enabled_providers: catalogue.map((app) => app.id), channel: 'app', read_aloud: false, offer_help: true, payment_method: 'DEMO_WALLET',
     },
     role: 'owner', storage: 'local-sqlite', catalogue, activity: [], requests: [], messages: [], audit: [],
     care_circle: [], events: [], appointments: [], reminders: [], contacts: [], conversations: [],
     permissions: permissionLabels, sensitive: ['manage_contacts', 'view_medication', 'view_payments', 'view_transcripts'], demo_controls: false,
     roles: { viewer: ['view_activity'], assistant: ['view_activity', 'manage_reminders', 'edit_profile'], approver: ['view_activity', 'approve'], administrator: ['view_activity', 'manage_circle'] },
+    onboarding: progress('done'), places, services: demoServices(), sample_places: samplePlaces,
+    payment_methods: { DEMO_WALLET: 'Demo wallet (simulated)', PAY_ON_COMPLETION: 'Pay on completion (simulated)' },
     ...overrides,
   }
+}
+
+export const places: Place[] = [
+  { id: 'place-home', label: 'Home', address: '12 Sample Lane, Demo Nagar (sample address)', notes: 'Gate 2', is_default_pickup: true },
+  { id: 'place-doctor', label: 'Doctor', address: 'Sunrise Clinic, 4 Example Road (sample address)', notes: 'Dr Mehta', is_default_pickup: false },
+]
+export const samplePlaces = [
+  { label: 'Home', address: '12 Sample Lane, Demo Nagar (sample address)', notes: 'Gate 2, ground floor' },
+  { label: 'Doctor', address: 'Sunrise Clinic, 4 Example Road (sample address)', notes: 'Dr Mehta' },
+]
+const stepTitles: [StepId, string][] = [
+  ['welcome', 'Welcome'], ['accessibility', 'Comfort and accessibility'], ['places', 'Saved places'], ['care_circle', 'Care Circle'],
+  ['services', 'Demo services'], ['payment', 'Payment (simulated)'], ['review', 'Review and finish'],
+]
+
+// 'done' is a finished setup; a number is how many steps are already done, in order.
+export function progress(done: 'done' | number = 'done'): Progress {
+  const count = done === 'done' ? stepTitles.length : done
+  const steps = stepTitles.map(([id, title], index) => ({ id, title, status: index < count ? ('done' as const) : null }))
+  return {
+    steps, current: steps.find((step) => step.status === null)?.id ?? 'review', completed: done === 'done',
+    completed_at: done === 'done' ? 1 : null, started_at: count ? 1 : null,
+    review: {
+      name: 'Meera', language: 'en-IN', channel: 'Tapping in the app', comfort: ['Larger text'], places: ['Home', 'Doctor'], pickup: 'Home',
+      services: demoServices().map((s) => ({ service_type: s.service_type, provider_label: s.provider_label, status: s.status })),
+      payment: 'Demo wallet (simulated)', care_circle: [{ name: 'Ravi', role: 'viewer', permissions: ['view_activity'] }], approval_rule: '',
+      missing: done === 'done' ? [] : ['Payment (simulated)'],
+    },
+  }
+}
+
+export function demoServices(status: ConnectionStatus = 'CONNECTED'): DemoService[] {
+  const on = status === 'CONNECTED'
+  const base = { connection_mode: 'SIMULATED' as const, status, consent_at: on ? 1_760_000_000 : null, updated_at: null, notice: 'Simulated provider — no real order or dispatch.' }
+  return [
+    { ...base, service_type: 'RIDE', provider_type: 'DEMO_RIDE', provider_label: 'Demo Ride Provider', description: 'Simulated rides. Options appear under familiar names (Uber, Ola, Rapido) as examples only.',
+      granted_capabilities: on ? ['quote_rides', 'book_rides', 'cancel_rides'] : [], capabilities: [{ id: 'quote_rides', label: 'Get sample ride fares' }, { id: 'book_rides', label: 'Make simulated ride bookings' }],
+      catalogue: { options: [
+        { id: 'rapido-auto', name: 'Rapido Auto', app_id: 'rapido', app_name: 'Rapido', pickup_min: 3, enabled: true },
+        { id: 'ola-mini', name: 'Ola Mini', app_id: 'ola', app_name: 'Ola', pickup_min: 5, enabled: true },
+        { id: 'uber-go', name: 'Uber Go', app_id: 'uber', app_name: 'Uber', pickup_min: 6, enabled: true },
+      ] } },
+    { ...base, service_type: 'FOOD', provider_type: 'DEMO_FOOD', provider_label: 'Demo Food Provider', description: 'Simulated meals from fictional demo kitchens.',
+      granted_capabilities: on ? ['quote_orders', 'place_orders', 'cancel_orders'] : [], capabilities: [{ id: 'quote_orders', label: 'Get sample prices' }],
+      catalogue: { delivery_fee_minor: 2500, kitchens: [
+        { id: 'swiggy', name: 'Demo Home Kitchen', app_name: 'Swiggy', enabled: true, items: [
+          { id: 'khichdi', name: 'Vegetable khichdi', price_minor: 8500, vegetarian: true, mild: true, minutes: 25 },
+          { id: 'roti', name: 'Two rotis', price_minor: 2000, vegetarian: true, mild: true, minutes: 15 },
+        ] },
+      ] } },
+    { ...base, service_type: 'PHARMACY', provider_type: 'DEMO_PHARMACY', provider_label: 'Demo Pharmacy Provider', description: 'Simulated orders of sample non-prescription items.',
+      granted_capabilities: on ? ['quote_orders', 'place_orders', 'cancel_orders'] : [], capabilities: [{ id: 'quote_orders', label: 'Get sample prices' }],
+      catalogue: { delivery_fee_minor: 2000, items: [
+        { id: 'ors', name: 'ORS sachets, pack of 5 (sample)', price_minor: 6000 },
+        { id: 'bandage', name: 'Crepe bandage, 10 cm (sample)', price_minor: 12000 },
+      ] } },
+  ]
 }
 
 export const swiggyMeal = { id: 'swiggy-khichdi', provider: 'swiggy', provider_name: 'Swiggy', name: 'Vegetable khichdi', price: 110, eta_min: 25, simulated: true, detail: 'From Demo Home Kitchen · Vegetarian, mild · Price includes delivery' }

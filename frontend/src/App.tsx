@@ -13,14 +13,15 @@ import { OfflineBanner } from './components/Banners'
 import ConnectionStatus from './ConnectionStatus'
 import ActivityScreen from './screens/ActivityScreen'
 import AboutScreen from './screens/AboutScreen'
-import AppsScreen from './screens/AppsScreen'
 import CareScreen from './screens/CareScreen'
 import DetailScreen from './screens/DetailScreen'
 import Home from './screens/Home'
 import JoinScreen from './screens/JoinScreen'
 import ProfileScreen from './screens/ProfileScreen'
 import RequestScreen from './screens/RequestScreen'
+import ServicesScreen from './screens/ServicesScreen'
 import SimpleHome from './screens/SimpleHome'
+import OnboardingWizard from './onboarding/OnboardingWizard'
 import type { Hub } from './screens/hubType'
 import Overview from './care/Overview'
 import { Approvals, CareActivity, CareDetail } from './care/CareActivity'
@@ -39,7 +40,8 @@ function pageTitle(route: Route): string {
     case 'activity': return 'Activity'
     case 'detail': return 'Activity details'
     case 'join': return 'Join a Care Circle'
-    case 'apps': return 'Apps'
+    case 'services': return 'Demo services'
+    case 'onboarding': return 'Set up Saathi'
     case 'family': return 'Care Circle'
     case 'profile': return 'Profile'
     case 'about': return 'About'
@@ -93,6 +95,15 @@ export default function App() {
   const language = owner ? owner.profile.language : care?.owner.language
   useEffect(() => { document.documentElement.lang = language === 'hi-IN' ? 'hi' : 'en' }, [language])
 
+  // A brand-new owner starts in setup once; Save and exit later returns them to Home.
+  const setupChecked = useRef(false)
+  useEffect(() => {
+    if (!owner || setupChecked.current) return
+    setupChecked.current = true
+    const flow = owner.onboarding
+    if (flow && !flow.completed && !flow.started_at && route.page === 'home') go({ page: 'onboarding' })
+  }, [owner, route.page, go])
+
   // Announce each screen: new title, and move keyboard and screen-reader focus to the top of the content.
   const title = pageTitle(route)
   useEffect(() => {
@@ -109,7 +120,7 @@ export default function App() {
   const ownerTabs: Tab[] = [
     { page: 'home', label: words.home, icon: <HomeIcon /> },
     { page: 'activity', label: words.activity, icon: <ActivityIcon /> },
-    { page: 'apps', label: words.apps, icon: <AppsIcon /> },
+    { page: 'services', label: words.services, icon: <AppsIcon /> },
     { page: 'family', label: words.family, icon: <FamilyIcon />, badge: alerts, badgeLabel: 'needing attention' },
     { page: 'profile', label: words.profile, icon: <ProfileIcon /> },
   ]
@@ -139,7 +150,8 @@ export default function App() {
       case 'request': return <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} simple={simple} />
       case 'activity': return <ActivityScreen hub={current} simple={simple} />
       case 'detail': return <DetailScreen hub={current} id={route.id} />
-      case 'apps': return <AppsScreen hub={current} />
+      case 'services': return <ServicesScreen hub={current} />
+      case 'onboarding': return <OnboardingWizard hub={current} step={route.step} />
       case 'family': return <CareScreen hub={current} />
       case 'profile': return <ProfileScreen hub={current} install={install} onSwitch={switchTo} />
       case 'about': return <AboutScreen hub={current} />
@@ -208,7 +220,7 @@ export default function App() {
             </>
           )}
         </footer>
-        {state ? <BottomNav route={route} tabs={tabs} /> : null}
+        {state && route.page !== 'onboarding' ? <BottomNav route={route} tabs={tabs} /> : null}
       </div>
     </div>
   )

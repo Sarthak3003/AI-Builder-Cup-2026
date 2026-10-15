@@ -9,7 +9,11 @@ test.each([
   ['', { page: 'home' }],
   ['#/', { page: 'home' }],
   ['#/activity', { page: 'activity' }],
-  ['#/apps', { page: 'apps' }],
+  ['#/apps', { page: 'services' }],
+  ['#/services', { page: 'services' }],
+  ['#/onboarding', { page: 'onboarding' }],
+  ['#/onboarding/places', { page: 'onboarding', step: 'places' }],
+  ['#/onboarding/nonsense', { page: 'onboarding' }],
   ['#/family', { page: 'family' }],
   ['#/profile', { page: 'profile' }],
   ['#/about', { page: 'about' }],
@@ -26,7 +30,7 @@ test.each(['#/request', '#/request/taxi', '#/nope', '#main'])('%s falls back to 
 })
 
 test('addresses and routes round-trip', () => {
-  for (const route of [{ page: 'home' }, { page: 'activity' }, { page: 'request', service: 'food' }, { page: 'request', service: 'ride', proposal: 'abc' }] as const) {
+  for (const route of [{ page: 'home' }, { page: 'activity' }, { page: 'request', service: 'food' }, { page: 'request', service: 'ride', proposal: 'abc' }, { page: 'onboarding', step: 'payment' }] as const) {
     expect(parseRoute(routeHref(route))).toEqual(route)
   }
   expect(tabHref('home')).toBe('#/')

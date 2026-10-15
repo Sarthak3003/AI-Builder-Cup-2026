@@ -20,7 +20,7 @@ from app.domain import (
     PaymentMethod,
     ServiceType,
 )
-from app.providers import DEMO_PROVIDERS
+from app.providers import DEMO_PROVIDERS, service_catalogue
 
 MAX_PLACES = 8
 STEP_TITLES = {
@@ -33,6 +33,23 @@ STEP_TITLES = {
     "review": "Review and finish",
 }
 CHANNELS = {"app": "Tapping in the app", "voice": "Speaking", "message": "Typing messages"}
+CAPABILITY_LABELS = {
+    "quote_rides": "Get sample ride fares",
+    "book_rides": "Make simulated ride bookings",
+    "cancel_rides": "Cancel simulated rides",
+    "quote_orders": "Get sample prices",
+    "place_orders": "Place simulated orders",
+    "cancel_orders": "Cancel simulated orders",
+}
+DESCRIPTIONS = {
+    "RIDE": "Simulated rides. Options appear under familiar names (Uber, Ola, Rapido) as "
+    "examples only: Saathi is not connected to those companies.",
+    "FOOD": "Simulated meals from fictional demo kitchens, listed under familiar app names "
+    "(Uber Eats, Swiggy, Zomato) as examples only.",
+    "PHARMACY": "Simulated orders of sample non-prescription items. No prescriptions and no "
+    "medical advice.",
+}
+SIMULATED_NOTICE = "Simulated provider — no real order or dispatch."
 
 
 def connection_record(service_type: ServiceType) -> dict:
@@ -122,6 +139,20 @@ class FinishIn(BaseModel):
     confirmed: Literal[True]
 
 
+class ConsentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: Literal[True]
+
+
+class GrantIn(BaseModel):
+    """Onboarding offers the two plainest kinds of access; Family offers the rest."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=60)
+    relationship: str = Field(default="", max_length=40)
+    can_approve: bool = False
+
+
 # --- Progress ----------------------------------------------------------------------------
 
 
@@ -197,6 +228,80 @@ def _missing_after(state: dict, step: str) -> str:
     return _missing(state, step)
 
 
+def review(state: dict) -> dict:
+    """The finish screen's summary, rebuilt from saved answers every time it is read."""
+    profile = state["profile"]
+    pickup = default_pickup(state)
+    comfort = [
+        label
+        for key, label in (
+            ("large_text", "Larger text"),
+            ("high_contrast", "High contrast"),
+            ("simple", "Simple language and fewer choices"),
+            ("read_aloud", "Read prices and confirmations aloud"),
+            ("offer_help", "Offer Care Circle help when something goes wrong"),
+        )
+        if profile.get(key)
+    ]
+    return {
+        "name": profile.get("name", ""),
+        "language": profile.get("language", "en-IN"),
+        "channel": CHANNELS.get(profile.get("channel", "app"), ""),
+        "comfort": comfort,
+        "places": [place["label"] for place in state["places"]],
+        "pickup": pickup["label"] if pickup else None,
+        "services": [
+            {"service_type": t, "provider_label": c["provider_label"], "status": c["status"]}
+            for t, c in state["connections"].items()
+        ],
+        "payment": PAYMENT_METHODS.get(profile.get("payment_method") or ""),
+        "care_circle": [
+            {"name": g["name"], "role": g["role"], "permissions": g["permissions"]}
+            for g in state.get("care_circle", [])
+            if g["status"] != "revoked"
+        ],
+        "approval_rule": (
+            f"An approver must agree to bookings above ₹{profile['approval_limit']} "
+            "and to every pharmacy order."
+            if profile.get("caregiver_enabled")
+            else ""
+        ),
+        "missing": [
+            STEP_TITLES[step]
+            for step in ONBOARDING_STEPS
+            if step != "review"
+            and (state["onboarding"]["steps"][step] is None or _missing_after(state, step))
+        ],
+    }
+
+
+def onboarding_view(state: dict) -> dict:
+    return {
+        **progress(state),
+        "places": state["places"],
+        "connections": state["connections"],
+        "payment_methods": PAYMENT_METHODS,
+        "review": review(state),
+    }
+
+
+def services_view(state: dict, enabled_apps: list[str]) -> list[dict]:
+    catalogue = service_catalogue(enabled_apps)
+    return [
+        {
+            **state["connections"][service_type],
+            "description": DESCRIPTIONS[service_type],
+            "notice": SIMULATED_NOTICE,
+            "capabilities": [
+                {"id": c, "label": CAPABILITY_LABELS[c]}
+                for c in DEMO_PROVIDERS[service_type].capabilities
+            ],
+            "catalogue": catalogue[service_type],
+        }
+        for service_type in SERVICE_TYPES
+    ]
+
+
 # --- Saved places ------------------------------------------------------------------------
 
 
@@ -204,7 +309,7 @@ def default_pickup(state: dict) -> dict | None:
     return next((p for p in state["places"] if p["is_default_pickup"]), None)
 
 
-def _sync_home(state: dict) -> None:
+def sync_home(state: dict) -> None:
     # Older screens and caretaker views read the usual pickup from the profile.
     pickup = default_pickup(state)
     state["profile"]["home"] = pickup["address"] if pickup else ""
@@ -237,7 +342,7 @@ def save_place(state: dict, body: PlaceIn, now: float | None = None) -> dict:
             other["is_default_pickup"] = other is place
     elif not default_pickup(state):
         place["is_default_pickup"] = True
-    _sync_home(state)
+    sync_home(state)
     return place
 
 
@@ -248,7 +353,7 @@ def delete_place(state: dict, place_id: str) -> None:
     state["places"].remove(place)
     if place["is_default_pickup"] and state["places"]:
         state["places"][0]["is_default_pickup"] = True
-    _sync_home(state)
+    sync_home(state)
 
 
 def set_home_address(state: dict, address: str, now: float | None = None) -> None:
@@ -258,7 +363,7 @@ def set_home_address(state: dict, address: str, now: float | None = None) -> Non
         pickup.update(address=address, updated_at=time.time() if now is None else now)
     else:
         save_place(state, PlaceIn(label="Home", address=address, is_default_pickup=True), now)
-    _sync_home(state)
+    sync_home(state)
 
 
 # --- Demo service connections ------------------------------------------------------------

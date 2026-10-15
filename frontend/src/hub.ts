@@ -2,7 +2,32 @@ export type Profile = {
   name: string; language: 'en-IN' | 'hi-IN'; large_text: boolean; high_contrast: boolean; simple?: boolean;
   vegetarian: boolean; mild: boolean; budget: number; home: string; caregiver_name: string;
   approval_limit: number; caregiver_enabled: boolean; medicines: string[]; enabled_providers: string[];
-  sharing?: Sharing;
+  sharing?: Sharing; channel?: Channel; read_aloud?: boolean; offer_help?: boolean; payment_method?: PaymentMethod | null;
+}
+export type Channel = 'app' | 'voice' | 'message'
+export type PaymentMethod = 'DEMO_WALLET' | 'PAY_ON_COMPLETION'
+export type StepId = 'welcome' | 'accessibility' | 'places' | 'care_circle' | 'services' | 'payment' | 'review'
+export type Review = {
+  name: string; language: Profile['language']; channel: string; comfort: string[]; places: string[]; pickup: string | null;
+  services: { service_type: ServiceType; provider_label: string; status: ConnectionStatus }[]; payment: string | null;
+  care_circle: { name: string; role: Role; permissions: string[] }[]; approval_rule: string; missing: string[];
+}
+export type Progress = {
+  steps: { id: StepId; title: string; status: 'done' | 'skipped' | null }[]; current: StepId;
+  completed: boolean; completed_at: number | null; started_at: number | null; review: Review;
+}
+export type Place = { id: string; label: string; address: string; notes: string; is_default_pickup: boolean; created_at?: number; updated_at?: number }
+export type SamplePlace = { label: string; address: string; notes: string }
+export type ServiceType = 'RIDE' | 'FOOD' | 'PHARMACY'
+export type ConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'SETUP_REQUIRED'
+export type RideOptionInfo = { id: string; name: string; app_id: string; app_name: string; pickup_min: number; enabled: boolean }
+export type MenuItem = { id: string; name: string; price_minor: number; vegetarian?: boolean; mild?: boolean; minutes?: number }
+export type KitchenInfo = { id: string; name: string; app_name: string; enabled: boolean; items: MenuItem[] }
+export type Catalogue = { options?: RideOptionInfo[]; kitchens?: KitchenInfo[]; items?: MenuItem[]; delivery_fee_minor?: number }
+export type DemoService = {
+  service_type: ServiceType; provider_type: string; provider_label: string; connection_mode: 'SIMULATED'; status: ConnectionStatus;
+  granted_capabilities: string[]; consent_at: number | null; updated_at: number | null; description: string; notice: string;
+  capabilities: { id: string; label: string }[]; catalogue: Catalogue;
 }
 export type Sharing = { ride: boolean; food: boolean; medicine: boolean; appointments: boolean }
 export type Service = 'food' | 'ride' | 'medicine'
@@ -46,6 +71,7 @@ export type HubState = {
   care_circle?: Grant[]; events?: CareEvent[]; appointments?: Appointment[]; reminders?: Reminder[]; contacts?: Contact[]; conversations?: Conversation[];
   permissions?: Record<string, string>; roles?: Record<Role, string[]>; sensitive?: string[]; demo_controls?: boolean;
   demo_people?: DemoPerson[]; demo_person?: string;
+  onboarding?: Progress; places?: Place[]; services?: DemoService[]; payment_methods?: Record<PaymentMethod, string>; sample_places?: SamplePlace[];
 }
 export type DemoPerson = { id: string; name: string; role: string }
 // What a caretaker receives: built by the backend from their permissions only.
@@ -87,3 +113,9 @@ export const formatWhen = (seconds: number) => when.format(new Date(seconds * 10
 export const inviteLink = (code: string) => `${window.location.origin}${window.location.pathname}#/join/${code}`
 export const serviceNames: Record<Service, string> = { ride: 'Book a ride', food: 'Order food', medicine: 'Medicine request' }
 export const waitText = (service: Service, minutes: number) => (service === 'ride' ? `${minutes} min away` : `About ${minutes} min`)
+export const connectionLabel: Record<ConnectionStatus, string> = { CONNECTED: 'Connected (demo)', DISCONNECTED: 'Disconnected', SETUP_REQUIRED: 'Setup required' }
+export const paymentMethodLabel: Record<PaymentMethod, string> = { DEMO_WALLET: 'Demo wallet (simulated)', PAY_ON_COMPLETION: 'Pay on completion (simulated)' }
+export const serviceTypeOf: Record<Service, ServiceType> = { ride: 'RIDE', food: 'FOOD', medicine: 'PHARMACY' }
+export const serviceOf: Record<ServiceType, Service> = { RIDE: 'ride', FOOD: 'food', PHARMACY: 'medicine' }
+// Money arrives as integer paise; only the screen turns it into rupees.
+export const formatINR = (minor: number) => `₹${(minor / 100).toLocaleString('en-IN', { minimumFractionDigits: minor % 100 ? 2 : 0, maximumFractionDigits: 2 })}`

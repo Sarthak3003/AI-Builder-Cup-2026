@@ -41,7 +41,7 @@ from app.care import (
     visible_events,
 )
 from app.config import Settings
-from app.domain import PaymentMethod
+from app.domain import PAYMENT_METHODS, PaymentMethod, ServiceType
 from app.hub_store import HubStore, initial_state
 from app.intent import (
     EMERGENCY,
@@ -51,7 +51,29 @@ from app.intent import (
     mentions_appointment,
     understand,
 )
+from app.onboarding import (
+    ConsentIn,
+    FinishIn,
+    GrantIn,
+    PlaceIn,
+    ProfilePatch,
+    StepIn,
+    connect,
+    delete_place,
+    disconnect,
+    finish,
+    mark,
+    onboarding_view,
+    progress,
+    reset_connection,
+    review,
+    save_place,
+    services_view,
+    set_home_address,
+    sync_home,
+)
 from app.providers import (
+    APP_IDS,
     NONE_ENABLED,
     PROVIDER_IDS,
     available,
@@ -61,7 +83,7 @@ from app.providers import (
     medicine_options,
     ride_options,
 )
-from app.seed import seed
+from app.seed import SAMPLE_PLACES, seed
 
 
 class Sharing(BaseModel):
@@ -82,7 +104,7 @@ class Profile(BaseModel):
     vegetarian: bool = True
     mild: bool = True
     budget: int = Field(default=200, ge=0, le=10000)
-    home: str = Field(default="Demo home", min_length=1, max_length=150)
+    home: str = Field(default="", max_length=150)
     caregiver_name: str = Field(default="", max_length=60)
     approval_limit: int = Field(default=150, ge=0, le=10000)
     caregiver_enabled: bool = False
@@ -339,6 +361,10 @@ def hub_router(config: Settings):
         current = who.get("grant") if who["role"] == "caregiver" else "owner"
         return {"demo_people": everyone, "demo_person": current}
 
+    def apps(state):
+        """Familiar app names the owner keeps switched on; each is still a simulated option."""
+        return [app for app in enabled_ids(state["profile"]) if app in APP_IDS]
+
     def public(state, who):
         if who["role"] == "caregiver":
             return {
@@ -364,6 +390,11 @@ def hub_router(config: Settings):
             "reminders": [reminder_view(r) for r in state["reminders"]],
             "contacts": state["contacts"],
             "conversations": [conversation_view(c, state) for c in state["conversations"]],
+            "onboarding": {**progress(state), "review": review(state)},
+            "places": state["places"],
+            "services": services_view(state, apps(state)),
+            "payment_methods": PAYMENT_METHODS,
+            "sample_places": SAMPLE_PLACES,
             "permissions": PERMISSIONS,
             "roles": {role: ROLES[role] for role in ROLES},
             "sensitive": sorted(SENSITIVE),
@@ -418,6 +449,8 @@ def hub_router(config: Settings):
 
         def save(state):
             state["profile"] = body.model_dump()
+            if state["places"]:
+                sync_home(state)
             record(state, "profile_updated")
             return public(state, who)
 
@@ -429,7 +462,7 @@ def hub_router(config: Settings):
 
         def save(state):
             need(who, "edit_profile")
-            state["profile"]["home"] = body.home
+            set_home_address(state, body.home)
             add_event(
                 state,
                 "address_changed",
@@ -442,6 +475,114 @@ def hub_router(config: Settings):
             return public(state, who)
 
         return mutate(who, save)
+
+    # --- Onboarding: each step is saved as it is finished and checked on the server -------
+
+    @router.get("/onboarding")
+    def onboarding(who=actor):
+        return mutate(who, onboarding_view, owner_only=True)
+
+    @router.patch("/onboarding/profile")
+    def onboarding_profile(body: ProfilePatch, who=actor):
+        def save(state):
+            state["profile"].update(body.model_dump(exclude_none=True, exclude={"step"}))
+            if body.step:
+                mark(state, body.step)
+            record(state, f"setup_{body.step or 'profile'}_saved")
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/onboarding/locations")
+    def onboarding_place(body: PlaceIn, who=actor):
+        def save(state):
+            place = save_place(state, body)
+            record(state, "place_saved", place["id"])
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.delete("/onboarding/locations/{place_id}")
+    def onboarding_remove_place(place_id: str, who=actor):
+        def save(state):
+            delete_place(state, place_id)
+            record(state, "place_removed", place_id)
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/onboarding/caretaker-grants")
+    def onboarding_grant(body: GrantIn, who=actor):
+        """View-only, or view and approve: two explicit, separate kinds of access."""
+
+        def save(state):
+            if len([g for g in state["care_circle"] if g["status"] != "revoked"]) >= 6:
+                raise HTTPException(409, "A Care Circle can have up to six people.")
+            role = "approver" if body.can_approve else "viewer"
+            grant = new_grant(body.name, body.relationship, role, [], "owner")
+            state["care_circle"].append(grant)
+            code = invite_code(who["owner"], grant)
+            add_event(
+                state,
+                "circle_invited",
+                f"{body.name} was invited as {ROLE_NAMES[role]}",
+                permission="manage_circle",
+            )
+            record(state, "circle_invited", grant["id"])
+            return {"grant": summary(grant), "code": code, "state": public(state, who)}
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/onboarding/steps/{step}")
+    def onboarding_step(step: str, body: StepIn, who=actor):
+        def save(state):
+            mark(state, step, body.skip)
+            record(state, f"setup_{step}_{'skipped' if body.skip else 'saved'}")
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/onboarding/finish")
+    def onboarding_finish(body: FinishIn, who=actor):
+        def save(state):
+            finish(state)
+            record(state, "setup_finished")
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    # --- Demo service connections: simulated records, never third-party logins -----------
+
+    @router.get("/services")
+    def services(who=actor):
+        return mutate(who, lambda state: services_view(state, apps(state)), owner_only=True)
+
+    @router.post("/services/{service_type}/connect-demo")
+    def connect_demo(service_type: ServiceType, body: ConsentIn, who=actor):
+        def save(state):
+            connect(state, service_type)
+            record(state, "service_connected", service_type)
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/services/{service_type}/disconnect")
+    def disconnect_demo(service_type: ServiceType, who=actor):
+        def save(state):
+            disconnect(state, service_type)
+            record(state, "service_disconnected", service_type)
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/services/{service_type}/reset")
+    def reset_demo_service(service_type: ServiceType, who=actor):
+        def save(state):
+            reset_connection(state, service_type)
+            record(state, "service_reset", service_type)
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
 
     @router.post("/requests")
     def create(body: ServiceRequest, who=actor):

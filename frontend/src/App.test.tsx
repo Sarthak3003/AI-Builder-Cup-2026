@@ -208,7 +208,7 @@ test('bottom navigation has five tabs and marks the current page', async () => {
   stubApi()
   render(<App />)
   const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Activity', 'Apps', 'Family', 'Profile'])
+  expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Activity', 'Services', 'Family', 'Profile'])
   expect(within(nav).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
   await userEvent.click(within(nav).getByRole('link', { name: 'Activity' }))
   expect(await screen.findByRole('heading', { name: 'Your activity' })).toBeInTheDocument()
@@ -293,11 +293,12 @@ test('a meal compares the food apps and names the kitchen and delivery time', as
   expect(screen.getByText(/From Demo Home Kitchen/)).toBeInTheDocument()
 })
 
-test('turning an app off saves the choice, and the page is honest that these are demos', async () => {
+test('turning an option off saves the choice, and the page is honest that these are demos', async () => {
   const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: { ...makeState().profile, ...(body as object) } }) })
   window.location.hash = '#/apps'
   render(<App />)
-  expect(await screen.findByText(/not connected to the real services/)).toBeInTheDocument()
+  expect(await screen.findByText(/not\s+connected to those companies/)).toBeInTheDocument()
+  expect(screen.getAllByText('Simulated provider — no real order or dispatch.')).toHaveLength(3)
   const uber = await screen.findByRole('switch', { name: 'Use Uber' })
   expect(uber).toBeChecked()
   await userEvent.click(uber)

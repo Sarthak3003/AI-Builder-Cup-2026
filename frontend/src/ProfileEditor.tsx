@@ -11,7 +11,6 @@ export default function ProfileEditor({ initial, busy, save }: { initial: Profil
       <label>Your name<input required maxLength={60} value={draft.name} onChange={e => update('name', e.target.value)} /></label>
       <label>Voice language<select value={draft.language} onChange={e => update('language', e.target.value as Profile['language'])}><option value="en-IN">English (India)</option><option value="hi-IN">Hindi (India)</option></select></label>
       <label>Default budget (₹)<input type="number" min={0} max={10000} required value={draft.budget} onChange={e => update('budget', Number(e.target.value))} /></label>
-      <label>Usual pickup<input required maxLength={150} value={draft.home} onChange={e => update('home', e.target.value)} /></label>
     </div>
     <fieldset><legend>Comfort and accessibility</legend>
       <label className="check"><input type="checkbox" checked={draft.large_text} onChange={e => update('large_text', e.target.checked)} />Larger text</label>

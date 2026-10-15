@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { serviceNames } from '../hub'
+import { serviceNames, serviceTypeOf } from '../hub'
 import type { Service } from '../hub'
 import { wordsFor } from '../copy'
 import { ChevronIcon } from '../icons'
@@ -17,11 +17,16 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
   const words = wordsFor(state.profile.language)
 
   const appsLine = (service: Service) => {
+    const connection = state.services?.find((item) => item.service_type === serviceTypeOf[service])
+    if (connection && connection.status !== 'CONNECTED') return `Setup required: connect the ${connection.provider_label}`
     if (service === 'medicine') return 'From your saved medicine list'
     const names = state.catalogue.filter((app) => app.service === service && state.profile.enabled_providers.includes(app.id)).map((app) => app.name)
-    return names.length ? `${names.join(' · ')} (demo)` : 'Turn on an app in Apps first'
+    return names.length ? `${names.join(' · ')} (demo)` : 'Turn on an option in Services first'
   }
   const unfinished = [...state.requests].reverse().find((item) => item.status === 'proposed' && item.expires_at * 1000 > now)
+  const flow = state.onboarding
+  const next = flow?.steps.find((step) => step.id === flow.current)
+  const done = flow?.steps.filter((step) => step.status !== null).length ?? 0
 
   return (
     <>
@@ -29,6 +34,14 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
         <h1>{words.hello(state.profile.name)}<span className="tagline">{words.tagline}</span></h1>
         <p className="lead">Need a ride or a meal? Ask Saathi. There is no need to call family, and you always confirm first.</p>
       </section>
+
+      {flow && !flow.completed ? (
+        <section className="card setup-card" aria-labelledby="setup-title">
+          <h2 id="setup-title">Finish setting up Saathi</h2>
+          <p>{done} of {flow.steps.length} steps done.{next ? ` Next: ${next.title}.` : ''} Your answers so far are saved.</p>
+          <a className="primary wide" href="#/onboarding">Continue setup</a>
+        </section>
+      ) : null}
 
       <SimpleToggle hub={hub} />
 
@@ -60,7 +73,7 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
 
       <section className="card demo-note" aria-labelledby="demo-title">
         <h2 id="demo-title">A prototype, clearly marked</h2>
-        <p>The apps shown here are demo versions. Nothing real is booked, ordered or paid. <a href="#/apps">See how the apps work</a>.</p>
+        <p>The services shown here are demo versions. Nothing real is booked, ordered or paid. <a href="#/services">See how the demo services work</a>.</p>
       </section>
 
       <section className="recent" aria-labelledby="recent-title">

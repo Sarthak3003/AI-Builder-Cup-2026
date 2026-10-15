@@ -90,7 +90,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
           {simple ? null : (
             <p className="muted apps-line">
               {apps.length ? <>Saathi will compare: <strong>{apps.map((app) => app.name).join(', ')}</strong> (demo apps). </> : <>No app is turned on for this. </>}
-              <a href="#/apps">Change in Apps</a>
+              <a href="#/services">Change in Services</a>
             </p>
           )}
           {unfinished && !simple ? <button className="secondary wide" onClick={() => setProposal(unfinished)}>Continue your unfinished request</button> : null}
@@ -156,7 +156,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
           {proposal.input?.message ? <p className="heard">You asked: “{proposal.input.message}”</p> : null}
           {appointment ? <p className="inline-note appointment-note">For your appointment: <strong>{appointment.title}</strong>, {formatWhen(appointment.starts_at)}, at {appointment.place}.</p> : null}
           {proposal.clarification ? (
-            <p className="clarify">{proposal.clarification} {proposal.clarification.startsWith('Turn on') ? <a href="#/apps">Open Apps</a> : null}</p>
+            <p className="clarify">{proposal.clarification} {proposal.clarification.startsWith('Turn on') ? <a href="#/services">Open Services</a> : null}</p>
           ) : simple ? null : (
             <p className="muted">Pick the one you like. You review it before anything is booked. Options expire after 15 minutes.</p>
           )}
