@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from app.config import Settings
 from app.domain import SCHEMA
@@ -176,3 +177,35 @@ class HubStore:
         """Read an account, returning unsaved initial state only when it does not exist."""
         state = self.read_document(f"hubAccounts/{owner}")
         return initial_state() if state is None else state
+
+    def expired_phone_keys(self, before: float, limit: int = 100) -> list[str]:
+        namespaces = ("phoneSessions", "phonePairings", "phoneEvents")
+        if not 1 <= limit <= 500:
+            raise ValueError("Cleanup batch limit must be between 1 and 500")
+        keys = []
+        if self.config.firestore_mode != "disabled":
+            client = self._firestore_client()
+            try:
+                for namespace in namespaces:
+                    query = (
+                        client.collection(namespace)
+                        .where(filter=FieldFilter("expires_delete_at", "<=", before))
+                        .limit(limit - len(keys))
+                    )
+                    keys.extend(doc.reference.path for doc in query.stream(timeout=5, retry=None))
+                    if len(keys) >= limit:
+                        break
+            finally:
+                client.close()
+        else:
+            with closing(sqlite3.connect(self.path, timeout=10)) as db:
+                for namespace in namespaces:
+                    rows = db.execute(
+                        "SELECT id FROM documents WHERE id LIKE ? "
+                        "AND json_extract(state, '$.expires_delete_at') <= ? LIMIT ?",
+                        (namespace + "/%", before, limit - len(keys)),
+                    )
+                    keys.extend(row[0] for row in rows)
+                    if len(keys) >= limit:
+                        break
+        return keys

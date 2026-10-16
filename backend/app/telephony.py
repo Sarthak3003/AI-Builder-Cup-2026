@@ -1,5 +1,7 @@
 """Provider authentication and TwiML; conversation and booking logic live elsewhere."""
 
+import logging
+import math
 import re
 from typing import Protocol
 from urllib.parse import parse_qsl
@@ -18,6 +20,7 @@ PREFIX = "/api/phone/twilio"
 MAX_BODY = 16_384
 CALL_ID = re.compile(r"CA[0-9a-fA-F]{32}\Z")
 ENDED = {"completed", "busy", "failed", "no-answer", "canceled"}
+logger = logging.getLogger(__name__)
 
 
 class TelephonyAdapter(Protocol):
@@ -154,6 +157,9 @@ def twilio_router(phone: PhoneService, settings: PhoneSettings):
             )
             # The initial webhook can also be replayed after the call has been paired or revoked.
             call = phone.read(call["session_id"], controller=controller)
+            if call["status"] == "EXPIRED":
+                phone.end(call["session_id"], controller=controller, reason="timeout")
+                return adapter.stop("This call expired. Please call again for a new request.")
             return reply_for(call)
         except HTTPException as error:
             if error.status_code == 429:
@@ -163,7 +169,13 @@ def twilio_router(phone: PhoneService, settings: PhoneSettings):
     @router.post("/incoming")
     async def incoming(request: Request):
         form = await verified(request)
-        return xml(await run_in_threadpool(incoming_call, form))
+        try:
+            return xml(await run_in_threadpool(incoming_call, form))
+        except HTTPException:
+            raise
+        except Exception:
+            logger.error("Phone incoming handler unavailable")
+            return xml(adapter.stop(reject=True))
 
     def collect(form, step):
         sid = session_id(form)
@@ -202,7 +214,8 @@ def twilio_router(phone: PhoneService, settings: PhoneSettings):
                 elif digits == "9":
                     kind, message = "speech", "repeat"
                 try:
-                    low_confidence = float(form.get("Confidence", "1")) < 0.6
+                    confidence = float(form.get("Confidence", "1"))
+                    low_confidence = not math.isfinite(confidence) or not 0.6 <= confidence <= 1
                 except (TypeError, ValueError):
                     low_confidence = True
                 if (not digits and low_confidence) or not (digits or speech):
@@ -235,7 +248,15 @@ def twilio_router(phone: PhoneService, settings: PhoneSettings):
                 raise ValueError()
         except ValueError:
             raise HTTPException(400, "Invalid call step.") from None
-        return xml(await run_in_threadpool(collect, form, step))
+        try:
+            return xml(await run_in_threadpool(collect, form, step))
+        except Exception:
+            logger.error("Phone turn unavailable; booking outcome must be checked in Activity")
+            return xml(
+                adapter.stop(
+                    "The call could not continue. Check Activity in Saathi before trying again."
+                )
+            )
 
     def finish(form, reason):
         try:

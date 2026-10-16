@@ -1091,6 +1091,8 @@ def hub_router(config: Settings):
     def transcript(conversation_id: str, who=actor):
         def read(state):
             conv = conversation_for(state, who, conversation_id, "view_transcripts")
+            if conv.get("transcript_expires_at", time.time() + 1) <= time.time():
+                raise HTTPException(410, "The phone transcript retention period has ended.")
             record(state, "transcript_viewed", conversation_id, actor_name(who))
             return {"id": conv["id"], "transcript": conv["transcript"]}
 
@@ -1104,6 +1106,8 @@ def hub_router(config: Settings):
 
         def prepare(state):
             conv = conversation_for(state, who, conversation_id, "view_summaries")
+            if conv.get("transcript_expires_at", time.time() + 1) <= time.time():
+                raise HTTPException(410, "The phone transcript retention period has ended.")
             ai_profile(state)
             return conv["transcript"], summarise(conv, state)["confirmed"]
 

@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import time
+import unicodedata
 from enum import StrEnum
 from typing import Literal
 from uuid import uuid4
@@ -63,8 +64,21 @@ TRANSITIONS = {
     "EXECUTING": {"COMPLETED", "AWAITING_EXTERNAL_APPROVAL", "FAILED"},
     "AWAITING_EXTERNAL_APPROVAL": {"COMPLETED", "FAILED", "CANCELLED", "EXPIRED"},
 }
-YES = {"yes", "yes confirm", "yes please", "confirm", "confirm it", "yes book it", "हाँ", "हां"}
-NO = {"no", "cancel", "cancel it", "stop", "never mind", "नहीं", "रद्द करो"}
+YES = {
+    "yes",
+    "yes confirm",
+    "yes confirm it",
+    "yes please",
+    "confirm",
+    "confirm it",
+    "yes book it",
+    "हाँ",
+    "हां",
+    "हाँ पुष्टि करें",
+    "हां पुष्टि करें",
+    "पुष्टि करें",
+}
+NO = {"no", "no thanks", "cancel", "cancel it", "stop", "never mind", "नहीं", "रद्द करो"}
 REPEAT = {"repeat", "say again", "pardon", "फिर से", "दोहराएं"}
 EMPTY_FOOD = {"food", "dinner", "lunch", "breakfast", "order food", "order dinner", "खाना"}
 
@@ -134,7 +148,21 @@ def _invalidate(state, session):
 
 
 def _fingerprint(quote):
-    fields = ("id", "service_type", "details", "amount_minor", "payment_method", "expires_at")
+    fields = (
+        "id",
+        "service_type",
+        "provider_type",
+        "provider_label",
+        "option_id",
+        "option_name",
+        "title",
+        "details",
+        "line_items",
+        "amount_minor",
+        "currency",
+        "payment_method",
+        "expires_at",
+    )
     data = json.dumps({k: quote[k] for k in fields}, sort_keys=True).encode()
     return hashlib.sha256(data).hexdigest()
 
@@ -156,17 +184,27 @@ def _present(session, quote):
         "fingerprint": _fingerprint(quote),
     }
     cost = rupees(quote["amount_minor"])
+    pickup = quote["details"].get("pickup")
+    route = f" Pickup: {pickup['address']}." if pickup else ""
     return _say(
         session,
-        f"{quote['title']} costs {cost}, including fees. This is a demo; no real service or "
+        f"{quote['title']} costs {cost}, including fees.{route} This is a demo; no real service or "
         "charge occurs. Shall I confirm? Say yes, confirm, or no.",
         f"{quote['title']} का कुल मूल्य {cost} है। यह केवल डेमो है, कोई पैसा नहीं लगेगा। "
         "क्या पुष्टि करूँ? हाँ या नहीं कहें।",
     )
 
 
-def booking_reply(booking):
+def booking_reply(booking, language="en-IN"):
     status = booking["booking_status"]
+    if language == "hi-IN":
+        if status == "AWAITING_APPROVAL":
+            return "अनुमति के लिए आपके केयर सर्कल को भेजा है। अभी बुकिंग नहीं हुई और पैसा नहीं लगा।"
+        if status == "FAILED":
+            return "डेमो सेवा बुकिंग की पुष्टि नहीं कर सकी। कोई बुकिंग नहीं हुई और पैसा नहीं लगा।"
+        if status in {"CANCELLED_SIMULATED", "DECLINED"}:
+            return "यह अनुरोध रद्द या अस्वीकृत हो गया। कोई नई बुकिंग नहीं हुई।"
+        return f"आपकी डेमो बुकिंग की पुष्टि हुई: {booking['provider_booking_id']}। कोई पैसा नहीं लगा।"
     if status == "AWAITING_APPROVAL":
         return "Sent to your Care Circle for approval. Nothing is booked or charged yet."
     if status == "FAILED":
@@ -306,7 +344,13 @@ class ConversationEngine:
         return result
 
     def _advance(self, state, session, turn, draft, now):
-        text = " ".join(turn.message.lower().strip(" .!?।").replace(",", " ").split())
+        text = " ".join(
+            unicodedata.normalize("NFC", turn.message)
+            .lower()
+            .strip(" .!?।")
+            .replace(",", " ")
+            .split()
+        )
         current = session["state"]
         if current == "EXPIRED":
             return "This conversation expired. Start a new conversation; nothing new was booked."
@@ -315,14 +359,22 @@ class ConversationEngine:
         if turn.kind in {"end", "disconnect"} or text in NO:
             _invalidate(state, session)
             transition(session, "CANCELLED")
-            return "The conversation has ended. No further booking will be made."
+            return _say(
+                session,
+                "The conversation has ended. No further booking will be made.",
+                "बातचीत समाप्त हो गई। कोई और बुकिंग नहीं की जाएगी।",
+            )
         if turn.kind == "silence" or not text:
             session["silences"] += 1
             if session["silences"] >= 3:
                 _invalidate(state, session)
                 transition(session, "CANCELLED")
-                return "I could not hear you. Please try again when you are ready. Goodbye."
-            return "I did not hear that. " + session["last_reply"]
+                return _say(
+                    session,
+                    "I could not hear you. Please try again when you are ready. Goodbye.",
+                    "सुनाई नहीं दिया। जब तैयार हों तो फिर कॉल करें। नमस्ते।",
+                )
+            return _say(session, "I did not hear that. ", "सुनाई नहीं दिया। ") + session["last_reply"]
         session["silences"] = 0
         if text in REPEAT:
             return session["last_reply"]
@@ -330,12 +382,28 @@ class ConversationEngine:
             _invalidate(state, session)
             transition(session, "CANCELLED")
             return EMERGENCY if any(word in text for word in EMERGENCY_WORDS) else SCAM
+        if private_text(turn.message) != turn.message:
+            return _say(
+                session,
+                "Please do not share payment details or verification codes. "
+                "Repeat your request without them.",
+                "भुगतान की जानकारी या सत्यापन कोड न बताएं। इनके बिना अनुरोध दोहराएं।",
+            )
         if current == "AWAITING_EXTERNAL_APPROVAL":
             booking = next(b for b in state["activity"] if b["id"] == session["booking_id"])
             if booking["booking_status"] != "AWAITING_APPROVAL":
                 target = "FAILED" if booking["booking_status"] == "FAILED" else "COMPLETED"
                 transition(session, target)
-            return booking_reply(booking)
+            return booking_reply(booking, session["language"])
+
+        if session["service"] == "ride" and re.search(
+            r"(?:change|actually|instead).*?(?:pickup|pick up|from)\b", text
+        ):
+            _invalidate(state, session)
+            session["pickup"] = None
+            return _question(
+                session, "pickup", "What is the new pickup place?", "आपको अब कहाँ से लेना है?"
+            )
 
         correction = re.search(
             r"(?:change|instead|actually|नहीं).*?(?:to|destination|जाना)\s+(.+)",
@@ -360,6 +428,15 @@ class ConversationEngine:
             if inferred and inferred.service != "food":
                 inferred = None
         given = draft or inferred
+        if (
+            session["service"] == "food"
+            and re.match(r"(?:actually|instead|change|make it|बदलो|बदलें)\b", text)
+            and not (given and given.service in {"ride", "medicine"})
+        ):
+            _invalidate(state, session)
+            given, _ = understand("order food " + turn.message, state["profile"])
+            transition(session, "COLLECTING_DETAILS")
+            session["waiting_for"] = "meal"
         if any(word in turn.message.lower() for word in MEDICAL_DIET_WORDS) and (
             session["service"] == "food"
             or (inferred and inferred.service == "food")
@@ -376,7 +453,11 @@ class ConversationEngine:
 
         if current == "AWAITING_CONFIRMATION":
             if text not in YES and not (turn.kind == "keypad" and text == "1"):
-                return "Please say yes, confirm, or no. You can also change your request."
+                return _say(
+                    session,
+                    "Please say yes, confirm, or no. You can also change your request.",
+                    "कृपया हाँ पुष्टि करें या नहीं कहें। आप अनुरोध बदल भी सकते हैं।",
+                )
             if not session["paired"]:
                 return "Guest mode cannot book. Pair with your Saathi app to continue."
             pending = session["pending"]
@@ -418,14 +499,18 @@ class ConversationEngine:
             transition(session, target)
             if created:
                 record(state, "conversation_confirmed", booking["id"], session["channel"])
-            return booking_reply(booking)
+            return booking_reply(booking, session["language"])
         if current == "PRESENTING_OPTIONS":
             ids = session["quote_ids"]
             numbers = {"one": 1, "two": 2, "three": 3, "एक": 1, "दो": 2, "तीन": 3}
             selected = numbers.get(text, int(text) if text.isdigit() else 0)
             if not 1 <= selected <= len(ids):
                 return "Please say the option number, or say cancel. " + session["last_reply"]
-            quote = next(q for q in state["quotes"] if q["id"] == ids[selected - 1])
+            quote = next((q for q in state["quotes"] if q["id"] == ids[selected - 1]), None)
+            if not quote or quote["status"] != "ACTIVE" or quote["expires_at"] <= now:
+                _invalidate(state, session)
+                transition(session, "EXPIRED")
+                return "Those prices have expired. Please call again for a fresh quote."
             return _present(session, quote)
         if session["service"] == "medicine":
             return _question(
@@ -537,7 +622,11 @@ class ConversationEngine:
         options = " ".join(
             f"{n}. {q['title']}, {rupees(q['amount_minor'])}." for n, q in enumerate(quotes, 1)
         )
-        return f"Demo meals: {options} Which option would you like? Say its number."
+        return _say(
+            session,
+            f"Demo meals: {options} Which option would you like? Say its number.",
+            f"डेमो भोजन: {options} कौन सा विकल्प चाहिए? उसका नंबर बताएं।",
+        )
 
     def _history(self, state, session):
         if not session["paired"]:

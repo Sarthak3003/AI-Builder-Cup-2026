@@ -209,6 +209,8 @@ def summarise(conv, state, perms=None):
     elif conv.get("options"):
         shown = conv["options"]
         text += f" {shown} quote{'s were' if shown > 1 else ' was'} shown; nothing was booked."
+    elif conv.get("workflow_state") in {"CANCELLED", "EXPIRED", "FAILED"}:
+        text += " The conversation ended without a booking."
     elif not conv.get("safety"):
         text += " Saathi asked for more details; nothing was booked."
     suggestions = []
@@ -256,11 +258,18 @@ def conversation_view(conv, state, perms=None):
             call_status="EXPIRED" if not end and expires <= now else conv.get("call_status"),
             ended_at=end or (expires if expires <= now else None),
             duration_seconds=max(0, int((end or min(now, expires)) - conv["at"])),
-            transcript_retained=conv.get("transcript_retained", False),
+            transcript_retained=bool(
+                conv.get("transcript_retained", False)
+                and conv.get("transcript_expires_at", now + 1) > now
+            ),
             booking_id=item["id"] if item else None,
         )
     if perms is None:
-        view["transcript"] = conv["transcript"]
+        view["transcript"] = (
+            []
+            if conv.get("transcript_expires_at", time.time() + 1) <= time.time()
+            else conv["transcript"]
+        )
     return view
 
 

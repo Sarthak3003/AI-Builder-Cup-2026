@@ -163,9 +163,6 @@ def test_food_selection_then_confirmation_and_provider_failure(owner):
     assert "Shall I confirm" in call.text and not state(owner)["activity"]
     ok(owner.post("/api/hub/demo/fail-next"))
     call.say("Yes, confirm it")
-    # The strict grammar asks again for an unsupported phrase rather than guessing consent.
-    if call.xml.find("Gather") is not None:
-        call.digits("1")
     assert "could not confirm" in call.text
     meal = state(owner)["activity"][0]
     assert (meal["booking_status"], meal["payment"]["status"]) == (

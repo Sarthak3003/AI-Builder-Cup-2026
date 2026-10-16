@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from uuid import uuid4
@@ -136,7 +137,7 @@ class PhoneService:
         return result
 
     def _call(self, session_id):
-        if not isinstance(session_id, str) or len(session_id) != 40 or not session_id.isalnum():
+        if not isinstance(session_id, str) or not re.fullmatch(r"[a-f0-9]{40}", session_id):
             raise HTTPException(404, "Call not found.")
         call = self.store.read_document(f"phoneSessions/{session_id}")
         if not call or call.get("expires_delete_at", float("inf")) <= time.time():
@@ -232,6 +233,11 @@ class PhoneService:
                 "Guest mode uses no private profile and cannot book. "
                 "You can try a demo quote. Do you need a ride or a meal?"
             )
+            if call["engine"]["language"] == "hi-IN":
+                call["engine"]["last_reply"] = (
+                    "अतिथि मोड में निजी प्रोफ़ाइल या बुकिंग उपलब्ध नहीं है। "
+                    "डेमो मूल्य देख सकते हैं। सवारी या भोजन चाहिए?"
+                )
             return self._respond(call, step)
 
         return self.store.atomic([call_key], enter)
@@ -278,7 +284,8 @@ class PhoneService:
         self._authorise(call, controller)
         call_key = f"phoneSessions/{session_id}"
         account_key = f"hubAccounts/{call['owner']}" if call["owner"] else None
-        keys = [call_key] + ([account_key] if account_key else [])
+        event_key = f"phoneEvents/{session_id}_{body.event_id}"
+        keys = [call_key, event_key] + ([account_key] if account_key else [])
         now = time.time()
 
         def apply(documents):
@@ -297,6 +304,12 @@ class PhoneService:
                 current["status"] = "EXPIRED"
                 current["ended_at"] = now
             self.engine.process(account, current["engine"], body, draft=draft, now=now)
+            if documents[event_key] is None:
+                documents[event_key] = {
+                    "session_id": session_id,
+                    "events": copy.deepcopy(current["engine"]["events"][-2:]),
+                    "expires_delete_at": current["expires_delete_at"],
+                }
             if body.kind in {"end", "disconnect"} or current["engine"]["state"] in {
                 "CANCELLED",
                 "EXPIRED",
@@ -360,6 +373,7 @@ class PhoneService:
             ended_at=call["ended_at"],
             end_reason=call.get("end_reason"),
             expires_at=call["expires_at"],
+            transcript_expires_at=call["expires_delete_at"],
         )
 
     def revoke(self, owner):
