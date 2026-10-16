@@ -557,6 +557,7 @@ class ConversationEngine:
             transcript_retained=session["retain_transcript"],
             ended_at=session["ended_at"],
             updated_at=session.get("last_at", session["created_at"]),
+            expires_at=session["expires_at"],
         )
         del state["conversations"][100:]
 

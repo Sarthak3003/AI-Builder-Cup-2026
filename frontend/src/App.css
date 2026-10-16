@@ -368,6 +368,9 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .timeline { display: flex; flex-direction: column; gap: 10px; padding-left: 20px; list-style: decimal; }
 .transcript { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius); background: var(--surface-2); }
 .overview.attention { border: 2px solid var(--blue-tint); }
+.phone-history { display: flex; flex-direction: column; gap: 12px; }
+.phone-pairing { display: flex; flex-direction: column; gap: 10px; padding: 16px; background: var(--blue-tint); border-radius: var(--radius); }
+.phone-pairing-code { font-size: clamp(1.4rem, 7vw, 2rem); letter-spacing: 0.12em; color: var(--blue-ink); font-variant-numeric: tabular-nums; }
 
 /* ---------- Ride page: laid out like a familiar ride app, every part marked as a demo ---------- */
 .ride-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

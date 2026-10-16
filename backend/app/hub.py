@@ -436,6 +436,18 @@ def hub_router(config: Settings):
     def state(who=actor):
         return mutate(who, lambda state: public(state, who))
 
+    @router.get("/snapshot")
+    def snapshot(who=actor):
+        current = store.read(who["owner"])
+        ensure(current)
+        expire_approvals(current)
+        if who["role"] == "caregiver":
+            grant = active_grant(current, who.get("grant", ""))
+            if not grant:
+                raise HTTPException(403, "Your Care Circle access was removed.")
+            who["grant_record"] = grant
+        return public(current, who)
+
     @router.put("/profile")
     def profile(body: Profile, who=actor):
         if any(not name.strip() or len(name) > 80 for name in body.medicines):
@@ -673,6 +685,17 @@ def hub_router(config: Settings):
         if who["role"] != "owner":
             raise HTTPException(403, "Only the account owner can read phone sessions.")
         return phone.read(session_id, owner=who["owner"])
+
+    @router.get("/phone/sessions")
+    def phone_sessions(who=actor):
+        if who["role"] != "owner":
+            raise HTTPException(403, "Only the account owner can read phone sessions.")
+        return phone.list_for_owner(who["owner"])
+
+    @router.post("/phone/revoke")
+    def revoke_phone(who=actor):
+        mutate(who, lambda state: None, owner_only=True)
+        return phone.revoke(who["owner"])
 
     @router.post("/conversation-sessions/{session_id}/turns")
     def conversation_turn(session_id: str, body: Turn, who=actor):

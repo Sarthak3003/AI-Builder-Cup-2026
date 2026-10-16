@@ -447,7 +447,7 @@ test('settings list what the caretaker can and cannot do, and leaving ends the c
 test('updates arrive without refreshing, and a revoked caretaker is told access was removed', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   let state = 0
-  stubApi({ 'GET /state': () => (++state === 1 ? makeCareState(['view_activity', 'approve'], { approvals: [booking(mealQuote(), 'AWAITING_APPROVAL')] }) : fail(403, { detail: 'Your Care Circle access was removed.' })) },
+  stubApi({ 'GET /snapshot': () => (++state === 1 ? makeCareState(['view_activity', 'approve'], { approvals: [booking(mealQuote(), 'AWAITING_APPROVAL')] }) : fail(403, { detail: 'Your Care Circle access was removed.' })) },
     makeCareState(['view_activity', 'approve']))
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()

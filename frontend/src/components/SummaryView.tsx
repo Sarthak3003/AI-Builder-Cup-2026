@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { formatWhen } from '../hub'
 import type { Conversation } from '../hub'
 
-const channelName: Record<string, string> = { app: 'In the app', voice: 'Voice', message: 'Message', call: 'Call' }
+const channelName: Record<string, string> = { app: 'In the app', voice: 'In-app voice', message: 'Message', call: 'Call', phone: 'Phone call' }
 
 // Confirmed lines come from stored records; suggestions are ideas, never things that happened.
 export default function SummaryView({ conversation, children }: { conversation: Conversation; children?: ReactNode }) {
@@ -13,6 +13,9 @@ export default function SummaryView({ conversation, children }: { conversation: 
         {channelName[conversation.channel] ?? conversation.channel} · {formatWhen(conversation.at)}
         {conversation.seeded ? ' · sample from the demo seed' : ''}
       </p>
+      {conversation.channel === 'phone' ? (
+        <p className="muted">{conversation.call_status === 'ACTIVE' ? 'Call in progress' : conversation.call_status === 'EXPIRED' ? 'Call expired' : 'Call ended'} · {conversation.duration_seconds ?? 0} seconds · {conversation.workflow_state?.replaceAll('_', ' ').toLowerCase()}</p>
+      ) : null}
       <p>{summary.text}</p>
       {summary.confirmed.length ? (
         <div className="summary-block confirmed">

@@ -4,6 +4,7 @@ import ProfileEditor from '../ProfileEditor'
 import { InstallCard } from '../components/Banners'
 import DemoControls from '../components/DemoControls'
 import PersonSwitcher from '../components/PersonSwitcher'
+import PhoneAccess from '../components/PhoneAccess'
 import type { useInstall } from '../usePwa'
 import type { Hub } from './hubType'
 
@@ -35,6 +36,7 @@ export default function ProfileScreen({ hub, install, onSwitch }: { hub: Hub; in
         </section>
       ) : null}
       <ProfileEditor key={JSON.stringify(state.profile)} initial={state.profile} busy={busy} save={save} />
+      <PhoneAccess hub={hub} />
       <InstallCard install={install} />
       <section className="card" aria-labelledby="account-title">
         <h2 id="account-title">Your demo session</h2>

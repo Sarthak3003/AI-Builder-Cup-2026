@@ -189,7 +189,7 @@ export function stubApi(routes: Record<string, Route> = {}, initial: HubState | 
       const pattern = new RegExp(`^${routePath.replace(/\*/g, '[^/]+')}$`)
       if (routeMethod === method && pattern.test(path)) return respond(handler(body))
     }
-    if (path === '/session' || path === '/state') return respond(initial)
+    if (path === '/session' || path === '/state' || path === '/snapshot') return respond(initial)
     return respond(fail(404, { detail: 'Not found' }))
   }))
   return calls

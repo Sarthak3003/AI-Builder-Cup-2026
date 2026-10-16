@@ -208,7 +208,7 @@ class PhoneService:
             account.setdefault("phone_sessions", []).insert(0, session_id)
             account["phone_sessions"] = account["phone_sessions"][:20]
             record(account, "phone_paired", session_id)
-            self.engine._history(account, engine)
+            self._history(account, call)
             return self._respond(call, step)
 
         result = self.store.atomic(keys, redeem)
@@ -305,6 +305,7 @@ class PhoneService:
                     "EXPIRED" if current["engine"]["state"] == "EXPIRED" else "ENDED"
                 )
                 current["ended_at"] = now
+            self._history(account, current)
             return self._respond(current, step)
 
         result = self.store.atomic(keys, apply)
@@ -340,11 +341,34 @@ class PhoneService:
                 ended_at=now,
                 end_reason=reason,
             )
+            if account and (not account_key or account.get("phone_epoch") == current["epoch"]):
+                self._history(account, current)
             return self.public(current)
 
         result = self.store.atomic([call_key] + ([account_key] if account_key else []), finish)
         self.release(session_id)
         return result
+
+    def _history(self, account, call):
+        if not call["owner"]:
+            return
+        self.engine._history(account, call["engine"])
+        conv = next(c for c in account["conversations"] if c["id"] == call["id"])
+        conv.update(
+            call_id=call["call_id"],
+            call_status=call["status"],
+            ended_at=call["ended_at"],
+            end_reason=call.get("end_reason"),
+            expires_at=call["expires_at"],
+        )
+
+    def revoke(self, owner):
+        def revoke(state):
+            state["phone_epoch"] = uuid4().hex
+            record(state, "phone_access_revoked")
+
+        self.store.change(owner, revoke)
+        return {"revoked": True}
 
     def list_for_owner(self, owner):
         account = self.store.read(owner)
@@ -377,7 +401,9 @@ class PhoneService:
             raise HTTPException(404, "Call not found.")
         if call["owner"]:
             account = self.store.read(call["owner"])
-            if account.get("phone_epoch") != call["epoch"]:
+            if session_id not in account.get("phone_sessions", []):
+                raise HTTPException(404, "Call not found.")
+            if controller is not None and account.get("phone_epoch") != call["epoch"]:
                 raise HTTPException(403, "Phone access was removed.")
         return self.public(call)
 

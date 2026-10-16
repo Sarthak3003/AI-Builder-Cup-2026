@@ -86,6 +86,8 @@ export type Line = { role: string; text: string }
 export type Conversation = {
   id: string; channel: string; at: number; service: Service | null; request_id: string | null; safety: string | null; seeded?: boolean;
   status: string; summary: Summary; transcript?: Line[];
+  workflow_state?: string; call_status?: string; ended_at?: number | null; duration_seconds?: number;
+  transcript_retained?: boolean; booking_id?: string | null;
 }
 export type HubState = {
   profile: Profile; role: 'owner'; storage: string; gemini?: boolean; catalogue: CatalogueApp[]; activity: Activity[]; quotes: Quote[];
@@ -93,6 +95,7 @@ export type HubState = {
   care_circle?: Grant[]; events?: CareEvent[]; appointments?: Appointment[]; reminders?: Reminder[]; contacts?: Contact[]; conversations?: Conversation[];
   permissions?: Record<string, string>; roles?: Record<Role, string[]>; sensitive?: string[]; demo_controls?: boolean;
   demo_people?: DemoPerson[]; demo_person?: string;
+  phone?: { enabled: boolean; number: string };
   onboarding?: Progress; places?: Place[]; services?: DemoService[]; payment_methods?: Record<PaymentMethod, string>; sample_places?: SamplePlace[];
 }
 export type DemoPerson = { id: string; name: string; role: string }

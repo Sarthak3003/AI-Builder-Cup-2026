@@ -247,6 +247,18 @@ def conversation_view(conv, state, perms=None):
     }
     view["status"] = item["booking_status"] if item else "no_booking"
     view["summary"] = summarise(conv, state, perms)
+    if conv["channel"] == "phone":
+        now = time.time()
+        end = conv.get("ended_at")
+        expires = conv.get("expires_at", now)
+        view.update(
+            workflow_state=conv.get("workflow_state", "NEW"),
+            call_status="EXPIRED" if not end and expires <= now else conv.get("call_status"),
+            ended_at=end or (expires if expires <= now else None),
+            duration_seconds=max(0, int((end or min(now, expires)) - conv["at"])),
+            transcript_retained=conv.get("transcript_retained", False),
+            booking_id=item["id"] if item else None,
+        )
     if perms is None:
         view["transcript"] = conv["transcript"]
     return view

@@ -77,18 +77,22 @@ export default function App() {
 
   // Approvals and alerts made on another device show up here without a manual refresh.
   const signedIn = state !== null
+  const pollMs = ['activity', 'detail', 'profile', 'conversations'].includes(route.page) ? 3000 : POLL_MS
   useEffect(() => {
     if (!signedIn) return
+    let active = true
+    let pending = false
     const poll = () => {
-      if (document.visibilityState !== 'visible' || !navigator.onLine) return
-      api<HubState | CareState>('/state').then(setState).catch((failure) => {
-        if (failure instanceof Error && /removed|revoked|expired|Invalid session/i.test(failure.message)) { setState(null); setError(failure.message) }
-      })
+      if (!active || pending || document.visibilityState !== 'visible' || !navigator.onLine) return
+      pending = true
+      api<HubState | CareState>('/snapshot').then((data) => { if (active) setState(data) }).catch((failure) => {
+        if (active && failure instanceof Error && /removed|revoked|expired|Invalid session/i.test(failure.message)) { setState(null); setError(failure.message) }
+      }).finally(() => { pending = false })
     }
-    const timer = window.setInterval(poll, POLL_MS)
+    const timer = window.setInterval(poll, pollMs)
     document.addEventListener('visibilitychange', poll)
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', poll) }
-  }, [signedIn, setError])
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', poll) }
+  }, [signedIn, setError, pollMs])
 
   const care = state?.role === 'caregiver' ? state : null
   const owner = state?.role === 'owner' ? state : null

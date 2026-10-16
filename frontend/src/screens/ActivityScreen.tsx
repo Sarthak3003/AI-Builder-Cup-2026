@@ -5,6 +5,7 @@ import { applyFilters, noFilters } from '../filters'
 import ActivityFilters from '../components/ActivityFilters'
 import ActivityList from '../components/ActivityList'
 import ActivityTimeline from '../components/ActivityTimeline'
+import PhoneHistory from '../components/PhoneHistory'
 import { UpcomingPlans } from '../components/Plans'
 import type { Hub } from './hubType'
 
@@ -19,6 +20,7 @@ export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simp
       <>
         <h1 className="page-title">Your activity</h1>
         <ActivityList items={state.activity} simple actions={cancel} empty={<p>Nothing yet.</p>} />
+        <PhoneHistory conversations={state.conversations ?? []} />
       </>
     )
   }
@@ -29,6 +31,7 @@ export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simp
       <p className="muted">Rides, meals, medicine requests and plans, whichever way you ask. All bookings and payments are simulated.</p>
       <UpcomingPlans runner={hub} appointments={state.appointments ?? []} reminders={state.reminders ?? []} canEdit canMarkDone canMedicine />
       <h2 className="section-title">History</h2>
+      <PhoneHistory conversations={state.conversations ?? []} />
       <ActivityFilters filters={filters} onChange={setFilters} />
       <ActivityList
         items={shown}
