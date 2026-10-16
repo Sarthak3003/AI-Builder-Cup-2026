@@ -44,7 +44,8 @@ class QuoteIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     service_type: ServiceType
-    channel: Literal["app", "message", "voice"] = "app"
+    channel: Literal["app", "message", "voice", "phone", "simulator", "whatsapp"] = "app"
+    pickup: PlaceRef | None = None
     pickup_place_id: str | None = Field(default=None, max_length=40)
     destination_place_id: str | None = Field(default=None, max_length=40)
     destination_text: str = Field(default="", max_length=150)
@@ -75,7 +76,9 @@ def match_place(state: dict, text: str) -> dict | None:
 
 
 def _ride_places(state: dict, body: QuoteIn) -> tuple[PlaceRef, PlaceRef, str | None]:
-    if body.pickup_place_id:
+    if body.pickup is not None:
+        pickup = body.pickup
+    elif body.pickup_place_id:
         pickup = _place(state, body.pickup_place_id)
     else:
         pickup = default_pickup(state)
@@ -98,7 +101,11 @@ def _ride_places(state: dict, body: QuoteIn) -> tuple[PlaceRef, PlaceRef, str | 
         destination = _ref(saved) if saved else PlaceRef(label=text[:60], address=text)
     else:
         raise HTTPException(422, "Choose where you would like to go.")
-    return _ref(pickup), destination, appointment["id"] if appointment else None
+    return (
+        _ref(pickup) if isinstance(pickup, dict) else pickup,
+        destination,
+        appointment["id"] if appointment else None,
+    )
 
 
 def approval_reason(state: dict, service_type: str, amount_minor: int) -> str:

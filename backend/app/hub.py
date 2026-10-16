@@ -31,8 +31,6 @@ from app.bookings import (
     expire_approvals,
     find_booking,
     lets_saathi_book,
-    offer_order,
-    pick_offer,
     settle,
 )
 from app.care import (
@@ -56,16 +54,10 @@ from app.care import (
     visible_events,
 )
 from app.config import Settings
+from app.conversation import ConversationEngine, Turn, new_session
 from app.domain import PAYMENT_METHODS, PaymentMethod, ServiceType
 from app.hub_store import HubStore, initial_state
-from app.intent import (
-    EMERGENCY,
-    EMERGENCY_WORDS,
-    SCAM,
-    looks_like_scam,
-    mentions_appointment,
-    understand,
-)
+from app.intent import looks_like_scam, mentions_appointment, understand
 from app.onboarding import (
     ConsentIn,
     FinishIn,
@@ -87,23 +79,9 @@ from app.onboarding import (
     set_home_address,
     sync_home,
 )
-from app.providers import (
-    APP_IDS,
-    MAX_LINES,
-    ItemRequest,
-    apps_catalogue,
-    enabled_apps,
-    match_products,
-    suggest_meals,
-)
+from app.providers import APP_IDS, apps_catalogue, enabled_apps
 from app.seed import SAMPLE_PLACES, seed
-
-PHARMACY_ONLY = (
-    "The demo pharmacy only has sample non-prescription items, such as ORS sachets, a crepe "
-    "bandage or a thermometer. It cannot order prescription medicines."
-)
-MEDICAL_DIET = "Demo meals cannot verify medical diets or allergens."
-MEDICAL_DIET_WORDS = ("allerg", "diabet", "एलर्जी")
+from app.workflows import ai_profile, next_appointment, record, remember
 
 
 class Sharing(BaseModel):
@@ -254,16 +232,10 @@ class Join(BaseModel):
     code: str = Field(min_length=10, max_length=500)
 
 
-def record(state, event, request_id="", actor="owner"):
-    state["audit"].append(
-        {"event": event, "request_id": request_id, "actor": actor, "at": time.time()}
-    )
-    state["audit"] = state["audit"][-200:]
-
-
 def hub_router(config: Settings):
     router = APIRouter(prefix="/api/hub")
     store = HubStore(config)
+    engine = ConversationEngine()
     # Seed, forced failure and simulated completion: on for local/test, opt-in elsewhere.
     demo_controls = (
         config.environment in {"local", "test"} or os.environ.get("SAATHI_DEMO_CONTROLS") == "1"
@@ -655,206 +627,35 @@ def hub_router(config: Settings):
         mutate(who, save, owner_only=True)
         return result
 
-    def remember(
-        state,
-        conv_id,
-        channel,
-        said,
-        reply,
-        *,
-        service=None,
-        request_id=None,
-        destination="",
-        medicine="",
-        options=0,
-        safety=None,
-    ):
-        """One interaction: shared history, a conversation record and any safety signal."""
-        now = time.time()
-        state["messages"].extend(
-            [
-                {"role": "user", "text": said, "channel": channel},
-                {"role": "assistant", "text": reply, "channel": channel},
-            ]
-        )
-        state["messages"] = state["messages"][-100:]
-        state["conversations"].insert(
-            0,
-            {
-                "id": conv_id,
-                "request_id": request_id,
-                "channel": channel,
-                "at": now,
-                "service": service,
-                "destination": destination,
-                "medicine": medicine,
-                "options": options,
-                "safety": safety,
-                "transcript": [
-                    {"role": "user", "text": said},
-                    {"role": "assistant", "text": reply},
-                ],
-            },
-        )
-        del state["conversations"][100:]
-        name = state["profile"]["name"]
-        if safety == "suspected_scam":
-            add_event(
-                state,
-                "suspected_scam",
-                "Possible scam message",
-                f"{name} shared a message that looks like a common scam. Saathi did nothing. "
-                "This is a suspicion from word matching, not a confirmed scam.",
-                permission="receive_alerts",
-                severity="attention",
-                certainty="suspected",
-            )
-        elif reply == EMERGENCY:
-            add_event(
-                state,
-                "emergency_mentioned",
-                f"{name} mentioned an emergency",
-                "Saathi cannot respond to emergencies and told them to contact emergency "
-                "services or a trusted person.",
-                permission="receive_alerts",
-                severity="attention",
-            )
-        if options or safety:
-            state["misses"] = []
-            return
-        state["misses"] = [stamp for stamp in state["misses"] if now - stamp < 600] + [now]
-        if len(state["misses"]) >= 3:
-            state["misses"] = []
-            add_event(
-                state,
-                "repeated_trouble",
-                "Saathi had trouble with several requests",
-                f"{name}'s last three requests in ten minutes needed more details. "
-                "Saathi has not assumed anything else.",
-                permission="receive_alerts",
-                severity="attention",
-            )
-
-    def ai_profile(state):
-        attempts = state.get("ai_attempts", [])
-        attempts = [stamp for stamp in attempts if time.time() - stamp < 60]
-        if len(attempts) >= 5:
-            raise HTTPException(429, "Please wait a minute before another AI request.")
-        attempts.append(time.time())
-        state["ai_attempts"] = attempts
-        return dict(state["profile"])
-
-    def quote_for_draft(state, draft, message, channel, appointment):
-        """Turn an understood request into quotes. A quote is never a booking."""
-        if draft.service == "ride":
-            body = QuoteIn(
-                service_type="RIDE",
-                channel=channel,
-                appointment_id=appointment["id"] if appointment else None,
-                destination_text="" if appointment else draft.destination,
-            )
-            return create_quotes(state, body, apps(state))
-        if draft.service == "food":
-            if any(word in message.lower() for word in MEDICAL_DIET_WORDS):
-                raise HTTPException(422, MEDICAL_DIET)
-            profile = state["profile"]
-            vegetarian = profile["vegetarian"] if draft.vegetarian is None else draft.vegetarian
-            mild = profile["mild"] if draft.mild is None else draft.mild
-            budget = profile["budget"] if draft.budget is None else draft.budget
-            picks = suggest_meals(apps(state), vegetarian, mild, budget * 100)
-            if not picks:
-                raise HTTPException(
-                    409, f"No demo meals fit within ₹{budget}. Try a larger budget or the menus."
-                )
-            group, quotes = None, []
-            for kitchen, dish in picks:
-                body = QuoteIn(
-                    service_type="FOOD",
-                    channel=channel,
-                    option_id=kitchen,
-                    items=[ItemRequest(item_id=dish)],
-                )
-                made = create_quotes(state, body, apps(state), group=group)
-                group = made["request_id"]
-                quotes += made["quotes"]
-            quotes.sort(key=offer_order)
-            if lets_saathi_book(state):
-                pick_offer(quotes)
-            return {"request_id": group, "service_type": "FOOD", "quotes": quotes}
-        products = match_products(f"{message} {draft.medicine}")
-        if not products:
-            raise HTTPException(409, PHARMACY_ONLY)
-        body = QuoteIn(
-            service_type="PHARMACY",
-            channel=channel,
-            items=[ItemRequest(item_id=product) for product in products[:MAX_LINES]],
-        )
-        return create_quotes(state, body, apps(state))
-
     def routed(conv_id, message, channel, draft, question, by, who, appointment=None):
-        if looks_like_scam(message):
-            draft, question = None, SCAM
-        elif any(word in message.lower() for word in EMERGENCY_WORDS):
-            draft, question = None, EMERGENCY
-        service = draft.service if draft else None
-        destination = appointment["place"] if appointment else (draft.destination if draft else "")
-
         def act(state):
-            made, reply = None, (draft.clarification if draft else question)
-            if draft and not draft.clarification:
-                try:
-                    made = quote_for_draft(state, draft, message, channel, appointment)
-                except HTTPException as refusal:
-                    if refusal.status_code not in {404, 409, 422}:
-                        raise
-                    reply = refusal.detail
-            quotes = made["quotes"] if made else []
-            if not quotes:
-                summary = "More details needed"
-            elif appointment:
-                summary = f"Rides to {appointment['place']} for {appointment['title']}"
-            elif service == "ride":
-                summary = f"Rides to {quotes[0]['details']['destination']['label']}"
-            elif service == "food":
-                summary = "Meals that suit you"
-            else:
-                summary = "Sample pharmacy items"
-            remember(
-                state,
-                str(conv_id),
-                channel,
-                message or "(nothing heard)",
-                reply or summary,
-                service=service,
-                request_id=made["request_id"] if made else None,
-                destination=destination if service == "ride" else "",
-                options=len(quotes),
-                safety="suspected_scam" if reply == SCAM else None,
+            return engine.app_request(
+                state, conv_id, message, channel, draft, question, by, appointment
             )
-            record(state, "quoted" if quotes else "asked_back", str(conv_id))
-            return {
-                "id": str(conv_id),
-                "service": service,
-                "channel": channel,
-                "status": "quoted" if quotes else "needs_details",
-                "summary": summary,
-                "clarification": "" if quotes else reply,
-                "request_id": made["request_id"] if made else None,
-                "quotes": quotes,
-                "appointment_id": appointment["id"] if appointment else None,
-                "input": {"message": message, "destination": destination},
-                "understood_by": by,
-                "transcript": message,
-            }
 
         return book_pick(who, ai_pick(who, mutate(who, act, owner_only=True)), f"ask-{conv_id}")
 
-    def next_appointment(state):
-        now = time.time()
-        upcoming = [
-            a for a in state["appointments"] if now - 3600 < a["starts_at"] < now + 14 * 86400
-        ]
-        return min(upcoming, key=lambda a: a["starts_at"], default=None)
+    @router.post("/conversation-sessions")
+    def start_conversation(who=actor):
+        def save(state):
+            sessions = state.setdefault("dialogues", {})
+            if len(sessions) >= 20:
+                sessions.pop(next(iter(sessions)))
+            session = new_session("app", language=state["profile"]["language"])
+            sessions[session["id"]] = session
+            return engine.view(session)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/conversation-sessions/{session_id}/turns")
+    def conversation_turn(session_id: str, body: Turn, who=actor):
+        def save(state):
+            session = state.get("dialogues", {}).get(session_id)
+            if not session:
+                raise HTTPException(404, "Conversation not found.")
+            return engine.process(state, session, body)
+
+        return mutate(who, save, owner_only=True)
 
     @router.post("/ask")
     def ask(body: AssistantRequest, who=actor):
