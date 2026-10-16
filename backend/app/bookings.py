@@ -125,21 +125,34 @@ def offer_order(quote: dict) -> tuple:
 
 
 WAIT_MINOR_PER_MIN = 500
+# Medicine requests always ask first, even when the owner lets Saathi book rides and meals.
+AUTO_BOOK = {"RIDE", "FOOD"}
 
 
-def pick_ride(quotes: list[dict]) -> dict:
-    """Saathi's own rule, not AI: the lowest price plus ₹5 for each minute until pickup."""
+def lets_saathi_book(state: dict) -> bool:
+    return state["profile"].get("show_options") is False
+
+
+def _wait(quote: dict) -> int:
+    return quote["pickup_eta_min"] or quote["delivery_min"] or 0
+
+
+def pick_offer(quotes: list[dict]) -> dict:
+    """Saathi's own rule, not AI: the lowest price plus ₹5 for each minute of waiting."""
     best = min(
         quotes,
         key=lambda q: (
-            q["amount_minor"] + WAIT_MINOR_PER_MIN * q["pickup_eta_min"],
+            q["amount_minor"] + WAIT_MINOR_PER_MIN * _wait(q),
             q["option_id"],
+            q["title"],
         ),
     )
     cheapest = best["amount_minor"] == min(q["amount_minor"] for q in quotes)
-    quickest = best["pickup_eta_min"] == min(q["pickup_eta_min"] for q in quotes)
+    quickest = _wait(best) == min(_wait(q) for q in quotes)
     why = (
-        "Lowest price and shortest wait"
+        "The only option"
+        if len(quotes) == 1
+        else "Lowest price and shortest wait"
         if cheapest and quickest
         else "Lowest price"
         if cheapest
@@ -147,9 +160,15 @@ def pick_ride(quotes: list[dict]) -> dict:
         if quickest
         else "Best balance of price and wait"
     )
-    price = rupees(best["amount_minor"])
-    reason = f"{why}: {price}, about {best['pickup_eta_min']} min away."
-    best["recommended"] = {"reason": reason, "by": "rules"}
+    when = (
+        f"about {_wait(best)} min away"
+        if best["service_type"] == "RIDE"
+        else f"delivered in about {_wait(best)} min"
+    )
+    best["recommended"] = {
+        "reason": f"{why}: {rupees(best['amount_minor'])}, {when}.",
+        "by": "rules",
+    }
     return best
 
 
@@ -226,9 +245,8 @@ def create_quotes(
             }
         )
     quotes.sort(key=offer_order)
-    if service_type == "RIDE" and len(quotes) > 1:
-        if state["profile"].get("show_ride_options") is False:
-            pick_ride(quotes)
+    if service_type == "RIDE" and lets_saathi_book(state):
+        pick_offer(quotes)
     state["quotes"].extend(quotes)
     _prune(state)
     return {"request_id": request_id, "service_type": service_type, "quotes": quotes}

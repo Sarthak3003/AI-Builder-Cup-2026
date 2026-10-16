@@ -51,8 +51,8 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
   const serviceType = serviceTypeOf[service]
   const provider = state.services?.find((item) => item.service_type === serviceType)
   const places = state.places ?? []
-  // With the list switched off, Saathi's pick opens directly; the owner still confirms it.
-  const autoPick = service === 'ride' && profile.show_ride_options === false
+  // With the list switched off, Saathi books rides and meals itself; medicine always asks first.
+  const autoPick = service !== 'medicine' && profile.show_options === false
   const firstPick = (offered: Quote[]) => (offered.length === 1 ? offered[0] : autoPick ? offered.find((q) => q.recommended) ?? null : null)
   const [handedOver] = useState(() => (state.quotes ?? []).filter((q) => q.request_id === proposalId && q.service === service && q.status === 'ACTIVE'))
   const [quotes, setQuotes] = useState<Quote[]>(handedOver)
@@ -96,19 +96,20 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
   function getQuotes(event: FormEvent) {
     event.preventDefault()
     const items = Object.entries(counts).filter(([, quantity]) => quantity > 0).map(([item_id, quantity]) => ({ item_id, quantity }))
+    const key = autoPick ? { idempotency_key: (autoKey.current ??= newId()) } : {}
     const body = service === 'ride'
-      ? { service_type: 'RIDE', pickup_place_id: pickupId || null, ...(destinationId === 'other' ? { destination_text: destinationText } : { destination_place_id: destinationId }), ...(autoPick ? { idempotency_key: (autoKey.current ??= newId()) } : {}) }
-      : service === 'food' ? { service_type: 'FOOD', option_id: kitchenId, items } : { service_type: 'PHARMACY', items }
+      ? { service_type: 'RIDE', pickup_place_id: pickupId || null, ...(destinationId === 'other' ? { destination_text: destinationText } : { destination_place_id: destinationId }), ...key }
+      : service === 'food' ? { service_type: 'FOOD', option_id: kitchenId, items, ...key } : { service_type: 'PHARMACY', items }
     void run(async () => {
       const result = await api<QuoteResult>('/quotes', 'POST', body)
-      if (result.booking) { autoKey.current = null; await openRide(result.booking); return }
+      if (result.booking) { autoKey.current = null; await openBooking(result.booking); return }
       setQuotes(result.quotes)
       setSelected(firstPick(result.quotes))
       await refresh()
     })
   }
 
-  async function openRide(booking: Activity) {
+  async function openBooking(booking: Activity) {
     await refresh()
     hub.notify(bookedNotice(booking))
     window.location.hash = `#/activity/${booking.id}`
@@ -120,7 +121,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
     const key = (keys.current[selected.id] ??= newId())
     void run(async () => {
       const booked = await api<Activity>(`/quotes/${selected.id}/confirm`, 'POST', { idempotency_key: key, confirmed: true })
-      if (autoPick && booked.booking_status !== 'FAILED') { await openRide(booked); return }
+      if (autoPick && booked.booking_status !== 'FAILED') { await openBooking(booked); return }
       await refresh()
       setReceipt(booked)
     })
@@ -151,7 +152,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
       {step === 'form' && (!provider || provider.status === 'CONNECTED') ? (
         <section className="card" aria-labelledby="form-title">
           <h2 id="form-title" tabIndex={-1} ref={heading} className={simple ? 'sr-only' : 'step-title'}>What would you like?</h2>
-          {simple ? null : <p className="muted">{autoPick ? 'Saathi will pick the ride with the best price and pickup time and book it for you straight away (simulated). You can cancel it on the ride page.' : `Prices come from the ${provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.`}</p>}
+          {simple ? null : <p className="muted">{!autoPick ? `Prices come from the ${provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.` : service === 'ride' ? 'Saathi will pick the ride with the best price and pickup time and book it for you straight away (simulated). You can cancel it on the ride page.' : 'Saathi will order what you choose straight away (simulated). You can cancel it on the order page.'}</p>}
           {lastGroup.length ? <button type="button" className="secondary wide" onClick={() => { setQuotes(lastGroup); setSelected(firstPick(lastGroup)) }}>Continue where you left off</button> : null}
           {service === 'ride' && !places.length ? (
             <p className="clarify">Add your home in setup first, so Saathi knows where to pick you up. <a href="#/onboarding/places">Add a place</a></p>
@@ -198,7 +199,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               </>
             ) : null}
             <button className="primary wide" disabled={busy || (service !== 'ride' && !chosenItems) || (service === 'ride' && !places.length)}>
-              {service !== 'ride' ? 'Get demo price' : autoPick ? 'Book the best demo ride' : 'Get demo prices'}
+              {service === 'ride' ? (autoPick ? 'Book the best demo ride' : 'Get demo prices') : autoPick ? 'Order now' : 'Get demo price'}
             </button>
           </form>
         </section>

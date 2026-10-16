@@ -20,10 +20,10 @@ export default function ProfileEditor({ initial, busy, save }: { initial: Profil
     </fieldset>
     <label>Saved medicine labels (one per line, up to 10)<textarea rows={3} value={draft.medicines.join('\n')} onChange={e => update('medicines', e.target.value.split('\n'))} /></label>
     <p className="muted">Saved labels only. Saathi does not diagnose, suggest doses, validate prescriptions or supply medicine.</p>
-    <fieldset><legend>When I ask for a ride</legend>
-      <label className="check"><input type="radio" name="ride-choice" checked={draft.show_ride_options !== false} onChange={() => update('show_ride_options', true)} />Show me the options and let me confirm</label>
-      <label className="check"><input type="radio" name="ride-choice" checked={draft.show_ride_options === false} onChange={() => update('show_ride_options', false)} />Let Saathi choose the best ride and book it for me</label>
-      <p className="muted">Saathi weighs the price and the pickup time, books straight away without asking, and opens the ride page. Every booking is simulated, and you can cancel it there.</p>
+    <fieldset><legend>When I ask for a ride or a meal</legend>
+      <label className="check"><input type="radio" name="choice" checked={draft.show_options !== false} onChange={() => update('show_options', true)} />Show me the options and let me confirm</label>
+      <label className="check"><input type="radio" name="choice" checked={draft.show_options === false} onChange={() => update('show_options', false)} />Let Saathi choose the best option and book it for me</label>
+      <p className="muted">Saathi weighs the price and the waiting time, books rides and meals straight away without asking, and opens the booking page. Medicine requests always ask first. Every booking is simulated, and you can cancel it there.</p>
     </fieldset>
     <fieldset><legend>Caregiver approvals</legend>
       <label className="check"><input type="checkbox" checked={draft.caregiver_enabled} onChange={e => update('caregiver_enabled', e.target.checked)} />Require caregiver approval above my limit, and for every medicine request</label>

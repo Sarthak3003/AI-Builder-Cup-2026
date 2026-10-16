@@ -10,6 +10,7 @@ from test_assistant import fake_gemini
 
 from app.config import Settings
 from app.main import create_app
+from app.onboarding import ensure_setup
 
 HOME = {"label": "Home", "address": "12 Sample Lane, Demo Nagar (sample address)"}
 DOCTOR = {"label": "Doctor", "address": "Sunrise Clinic, 4 Example Road (sample address)"}
@@ -186,10 +187,10 @@ def test_quotes_preview_the_payment_method_and_the_owners_approval_rule(owner):
     assert pharmacy["approval"] == {"required": True, "reason": "Pharmacy orders need approval."}
 
 
-def hide_ride_options(api):
+def let_saathi_book(api):
     profile = ok(api.get("/api/hub/state"))["profile"]
-    assert profile["show_ride_options"] is True
-    profile["show_ride_options"] = False
+    assert profile["show_options"] is True
+    profile["show_options"] = False
     ok(api.put("/api/hub/profile", json=profile))
 
 
@@ -198,7 +199,7 @@ def test_with_ride_options_hidden_saathi_picks_one_ride_by_price_and_wait(owner,
     places = set_up(owner)
     doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
     assert not any(q.get("recommended") for q in ok(quote(owner, **doctor))["quotes"])
-    hide_ride_options(owner)
+    let_saathi_book(owner)
     rides = ok(quote(owner, **doctor))["quotes"]
     picked = [q for q in rides if q.get("recommended")]
     assert [q["option_id"] for q in picked] == ["rapido-auto"]
@@ -212,22 +213,22 @@ def test_with_ride_options_hidden_saathi_picks_one_ride_by_price_and_wait(owner,
     ] == "rules"
     assert after["activity"] == [], "a pick is only a suggestion; nothing is booked"
     single = ok(quote(owner, **doctor, option_id="uber-go"))["quotes"]
-    assert single[0].get("recommended") is None
+    assert single[0]["recommended"]["reason"] == "The only option: ₹135, about 6 min away."
 
 
 def test_gemini_can_reweigh_the_pick_and_the_rule_stands_if_it_cannot(owner, monkeypatch):
     places = set_up(owner)
-    hide_ride_options(owner)
+    let_saathi_book(owner)
     doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
-    sent = fake_gemini(monkeypatch, {"option_id": "demo-ride", "reason": "A car, ₹94, 4 min."})
+    sent = fake_gemini(monkeypatch, {"choice": 1, "reason": "A car, ₹94, 4 min."})
     rides = ok(quote(owner, **doctor))["quotes"]
     picks = {q["option_id"]: q["recommended"] for q in rides if q.get("recommended")}
     assert picks == {"demo-ride": {"reason": "A car, ₹94, 4 min.", "by": "gemini"}}
     stored = {q["id"]: q.get("recommended") for q in ok(owner.get("/api/hub/state"))["quotes"]}
     assert [mark["by"] for mark in stored.values() if mark] == ["gemini"]
     prompt = json.loads(sent[0].data)["contents"][0]["parts"][0]["text"]
-    assert '"minutes_to_pickup": 3' in prompt and '"price_rupees": 83.0' in prompt
-    fake_gemini(monkeypatch, {"option_id": "helicopter", "reason": "Fastest."})
+    assert '"minutes_to_wait": 3' in prompt and '"price_rupees": 83.0' in prompt
+    fake_gemini(monkeypatch, {"choice": 9, "reason": "Fastest."})
     rides = ok(quote(owner, **doctor))["quotes"]
     assert [q["option_id"] for q in rides if q.get("recommended")] == ["rapido-auto"]
 
@@ -238,7 +239,7 @@ def test_saathi_books_its_pick_end_to_end_once_per_retry_key(owner, monkeypatch)
     doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
     asked = {**doctor, "idempotency_key": "book-best-0001"}
     assert "booking" not in ok(quote(owner, **asked)), "the list is still shown, so no booking"
-    hide_ride_options(owner)
+    let_saathi_book(owner)
     first = ok(quote(owner, **asked))["booking"]
     assert (first["option_id"], first["provider_booking_id"]) == ("rapido-auto", "DEMO-RIDE-1042")
     assert (first["booking_status"], first["payment"]["status"]) == (
@@ -260,7 +261,7 @@ def test_saathi_books_its_pick_end_to_end_once_per_retry_key(owner, monkeypatch)
 def test_asking_saathi_books_the_ride_and_a_forced_failure_books_nothing(owner, monkeypatch):
     monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
     set_up(owner)
-    hide_ride_options(owner)
+    let_saathi_book(owner)
     ask = {"id": "11111111-1111-4111-8111-111111111111", "message": "Take me to my doctor"}
     reply = ok(owner.post("/api/hub/ask", json=ask))
     assert reply["booking"]["title"] == "Rapido Auto to Doctor"
@@ -276,6 +277,47 @@ def test_asking_saathi_books_the_ride_and_a_forced_failure_books_nothing(owner, 
         "FAILED",
         "CONFIRMED_SIMULATED",
     ]
+
+
+def test_asking_for_a_meal_orders_saathis_pick_and_the_food_form_orders_at_once(owner, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    set_up(owner)
+    let_saathi_book(owner)
+    ask = {"id": str(uuid4()), "message": "I am hungry, something light"}
+    meal = ok(owner.post("/api/hub/ask", json=ask))["booking"]
+    assert (meal["title"], meal["provider_booking_id"]) == (
+        "Vegetable khichdi from Saathi Demo Kitchen",
+        "DEMO-FOOD-1042",
+    )
+    assert meal["chosen_by"] == {
+        "reason": "Lowest price and shortest wait: ₹105, delivered in about 25 min.",
+        "by": "rules",
+    }
+    form = {"service_type": "FOOD", "option_id": "swiggy", "items": [{"item_id": "roti"}]}
+    assert "booking" not in ok(quote(owner, **form)), "no retry key, so nothing is ordered"
+    ordered = ok(quote(owner, **form, idempotency_key="order-now-0001"))["booking"]
+    assert (ordered["title"], ordered["booking_status"]) == (
+        "Two rotis from Demo Home Kitchen",
+        "CONFIRMED_SIMULATED",
+    )
+    assert ordered["chosen_by"] is None, "the person chose this meal, not Saathi"
+
+
+def test_medicine_requests_always_ask_first(owner, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    set_up(owner)
+    let_saathi_book(owner)
+    reply = ok(owner.post("/api/hub/ask", json={"id": str(uuid4()), "message": "I need ORS"}))
+    assert reply["quotes"] and "booking" not in reply
+    asked = {"service_type": "PHARMACY", "items": [{"item_id": "ors"}]}
+    assert "booking" not in ok(quote(owner, **asked, idempotency_key="pharmacy-0001"))
+    assert ok(owner.get("/api/hub/state"))["activity"] == []
+
+
+def test_an_older_saved_choice_carries_over_to_the_renamed_setting():
+    state = {"profile": {"show_ride_options": False}}
+    ensure_setup(state)
+    assert state["profile"]["show_options"] is False and "show_ride_options" not in state["profile"]
 
 
 def test_expired_quotes_drop_out_of_the_active_list(owner, monkeypatch):

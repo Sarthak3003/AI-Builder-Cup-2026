@@ -3,7 +3,7 @@ export type Profile = {
   vegetarian: boolean; mild: boolean; budget: number; home: string; caregiver_name: string;
   approval_limit: number; caregiver_enabled: boolean; medicines: string[]; enabled_providers: string[];
   sharing?: Sharing; channel?: Channel; read_aloud?: boolean; offer_help?: boolean; payment_method?: PaymentMethod | null;
-  show_ride_options?: boolean;
+  show_options?: boolean;
 }
 export type Channel = 'app' | 'voice' | 'message'
 export type PaymentMethod = 'DEMO_WALLET' | 'PAY_ON_COMPLETION'
@@ -128,7 +128,8 @@ export const live = (item: Activity) => item.booking_status === 'AWAITING_APPROV
 export const bookedNotice = (booking: Activity) => (
   booking.booking_status === 'AWAITING_APPROVAL' ? 'Sent for approval. Nothing is booked or charged yet.'
     : booking.booking_status === 'FAILED' ? 'The booking failed. Nothing was booked or charged.'
-      : `Demo booking confirmed: ${booking.provider_booking_id}. No real driver will come and no money moves.`
+      : booking.service === 'food' ? `Demo order placed: ${booking.provider_booking_id}. No real food will come and no money moves.`
+        : `Demo booking confirmed: ${booking.provider_booking_id}. No real driver will come and no money moves.`
 )
 export const roleLabel: Record<Role, string> = { viewer: 'Viewer', assistant: 'Assistant', approver: 'Approver', administrator: 'Administrator' }
 export const roleBlurb: Record<Role, string> = {

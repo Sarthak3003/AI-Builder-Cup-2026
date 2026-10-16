@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { formatINR, formatWhen, paymentMethodLabel } from '../hub'
 import type { Activity, Appointment, CareEvent, Conversation } from '../hub'
+import PickNote from './PickNote'
 import PriceLines from './PriceLines'
 import ProviderBadge from './ProviderBadge'
 import RideTrip from './RideTrip'
@@ -16,6 +17,7 @@ function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appoint
       <section className="card">
         <ProviderBadge id={item.app_id ?? item.provider_type} name={item.app_name ?? item.provider_label} />
         <StatusChips item={item} />
+        {item.chosen_by ? <PickNote pick={item.chosen_by} title="Ordered for you by Saathi" /> : null}
         <dl className="receipt-details">
           {item.provider_booking_id ? <div><dt>Booking reference</dt><dd>{item.provider_booking_id} (simulated)</dd></div> : null}
           <div><dt>Provider</dt><dd>{item.provider_label} (simulated)</dd></div>

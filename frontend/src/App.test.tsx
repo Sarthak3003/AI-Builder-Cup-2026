@@ -322,25 +322,24 @@ test('a meal is chosen from a kitchen menu and priced by the server with a demo 
   expect(screen.getByText('Demo order — no real food will be delivered.')).toBeInTheDocument()
 })
 
-test('the profile can let Saathi choose and book rides', async () => {
+test('the profile can let Saathi choose and book rides and meals', async () => {
   const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: body as Profile }) })
   window.location.hash = '#/profile'
   render(<App />)
   expect(await screen.findByRole('radio', { name: 'Show me the options and let me confirm' })).toBeChecked()
-  expect(screen.getByText(/books straight away without asking, and opens the ride page/)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('radio', { name: 'Let Saathi choose the best ride and book it for me' }))
+  expect(screen.getByText(/books rides and meals straight away without asking.*Medicine requests always ask first/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('radio', { name: 'Let Saathi choose the best option and book it for me' }))
   await userEvent.click(screen.getByRole('button', { name: 'Save preferences' }))
   const saved = calls.find((call) => call.method === 'PUT' && call.url.endsWith('/profile'))?.body as Profile
-  expect(saved.show_ride_options).toBe(false)
+  expect(saved.show_options).toBe(false)
 })
 
 const chosen = { reason: 'Lowest price and shortest wait: ₹83, about 3 min away.', by: 'rules' } as const
-function bookingForMe() {
-  const booked = booking(rapidoQuote(), 'CONFIRMED_SIMULATED', { chosen_by: chosen })
+function bookingForMe(booked = booking(rapidoQuote(), 'CONFIRMED_SIMULATED', { chosen_by: chosen })) {
   const before = makeState()
-  before.profile.show_ride_options = false
+  before.profile.show_options = false
   const after = makeState({ activity: [booked] })
-  after.profile.show_ride_options = false
+  after.profile.show_options = false
   let done = false
   const state = () => (done ? after : before)
   return { booked, before, finish: <T,>(value: T) => { done = true; return value }, state }
@@ -377,6 +376,34 @@ test('asking Saathi for a ride books it end to end when Saathi books for me', as
   expect(await screen.findByRole('heading', { name: 'Demo driver on the way' })).toBeInTheDocument()
   expect(window.location.hash).toBe(`#/activity/${booked.id}`)
   expect(screen.getByText('Booked for you by Saathi')).toBeInTheDocument()
+})
+
+test('meals too: Order now places the order at once, and asking Saathi orders its pick', async () => {
+  const meal = booking(mealQuote(), 'CONFIRMED_SIMULATED', { chosen_by: { reason: 'Lowest price and shortest wait: ₹105, delivered in about 25 min.', by: 'rules' } })
+  const { booked, before, finish, state } = bookingForMe(meal)
+  const calls = stubApi({
+    'POST /quotes': () => finish({ ...quoted([mealQuote()]), booking: booked }),
+    'POST /ask': () => finish({ ...routedRide, service: 'food', booking: booked }),
+    'GET /state': state,
+  }, before)
+  window.location.hash = '#/request/food'
+  const { unmount } = render(<App />)
+  expect(await screen.findByText(/Saathi will order what you choose straight away \(simulated\)/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'More: Vegetable khichdi' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Order now' }))
+  expect(await screen.findByText('Demo order placed: DEMO-FOOD-1042. No real food will come and no money moves.')).toBeInTheDocument()
+  expect(window.location.hash).toBe(`#/activity/${booked.id}`)
+  expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'FOOD', option_id: 'demo-kitchen', items: [{ item_id: 'khichdi', quantity: 1 }], idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/) })
+  expect(confirmCalls(calls)).toHaveLength(0)
+  unmount()
+
+  window.location.hash = '#/'
+  render(<App />)
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Or type it here' }), 'I am hungry, something light')
+  await userEvent.click(screen.getByRole('button', { name: 'Ask Saathi' }))
+  expect(await screen.findByText('Ordered for you by Saathi')).toBeInTheDocument()
+  expect(screen.getByText(/Lowest price and shortest wait: ₹105, delivered in about 25 min\./)).toBeInTheDocument()
+  expect(window.location.hash).toBe(`#/activity/${booked.id}`)
 })
 
 test('turning an option off saves the choice, and the page is honest that these are demos', async () => {

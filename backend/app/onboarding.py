@@ -87,7 +87,7 @@ PROFILE_DEFAULTS = {
     "read_aloud": False,
     "offer_help": True,
     "payment_method": None,
-    "show_ride_options": True,
+    "show_options": True,
 }
 
 
@@ -95,8 +95,11 @@ def ensure_setup(state: dict) -> dict:
     """Add any missing setup fields; a new or older account starts with setup to do."""
     for key, value in new_setup().items():
         state.setdefault(key, value)
+    profile = state["profile"]
+    if "show_ride_options" in profile:
+        profile.setdefault("show_options", profile.pop("show_ride_options"))
     for key, value in PROFILE_DEFAULTS.items():
-        state["profile"].setdefault(key, value)
+        profile.setdefault(key, value)
     return state
 
 
