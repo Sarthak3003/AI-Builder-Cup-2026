@@ -1,11 +1,13 @@
 """Appointments, reminders, conversations, safety signals, coordination and the demo seed."""
 
+import json
 import time
 from uuid import uuid4
 
 import pytest
 from booking_helpers import confirm, ok, ready
 from fastapi.testclient import TestClient
+from test_assistant import fake_gemini
 
 from app.assistant import Summary
 from app.config import Settings
@@ -206,7 +208,7 @@ def test_gemini_summary_never_decides_what_was_confirmed(app, owner, monkeypatch
     monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(
         "app.hub.summarise_conversation",
-        lambda lines, confirmed: Summary(
+        lambda lines, confirmed, *, language="en-IN": Summary(
             text="Meera wanted to go to the market.", suggestions=["Offer to go along."]
         ),
     )
@@ -219,6 +221,36 @@ def test_gemini_summary_never_decides_what_was_confirmed(app, owner, monkeypatch
     }
     ok(confirm(owner, asked["quotes"][0]))
     assert state(owner)["conversations"][0]["summary"]["confirmed"][0].startswith("Booked")
+
+
+@pytest.mark.parametrize("as_caregiver", [False, True])
+def test_ai_summary_uses_current_owner_language_and_preserves_history(
+    app, owner, monkeypatch, as_caregiver
+):
+    asked = ask(owner, "Take me to the market")
+    ok(confirm(owner, asked["quotes"][0]))
+    conversation = state(owner)["conversations"][0]
+    conv = conversation["id"]
+    confirmed = conversation["summary"]["confirmed"]
+    path = f"/api/hub/conversations/{conv}"
+    before = ok(owner.get(path + "/transcript"))
+    reader = join(app, owner, "Asha", "viewer", ["view_summaries"]) if as_caregiver else owner
+    ok(owner.patch("/api/hub/onboarding/profile", json={"language": "hi-IN"}))
+    text = "बाज़ार जाने के लिए डेमो बुकिंग की पुष्टि हुई।"
+    suggestions = ["पूछें कि क्या कोई साथ चल सकता है।"]
+    sent = fake_gemini(monkeypatch, {"text": text, "suggestions": suggestions})
+    result = ok(reader.post(path + "/summary"))["summary"]
+    assert result == {
+        "by": "gemini",
+        "text": text,
+        "suggestions": suggestions,
+        "confirmed": confirmed,
+    }
+    payload = json.loads(sent[0].data)
+    assert "Hindi (Devanagari)" in payload["systemInstruction"]["parts"][0]["text"]
+    assert "user: Take me to the market" in payload["contents"][0]["parts"][0]["text"]
+    assert ok(owner.get(path + "/transcript")) == before
+    assert state(owner)["conversations"][0]["summary"] == result
 
 
 def test_suspected_scam_is_flagged_as_a_suspicion_and_nothing_happens(app, owner):

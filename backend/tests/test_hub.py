@@ -1,4 +1,5 @@
 import base64
+import json
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -6,6 +7,7 @@ import pytest
 from booking_helpers import book, confirm, ok, quotes, ready
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from test_assistant import fake_gemini
 
 from app.config import Settings
 from app.main import create_app
@@ -202,6 +204,27 @@ def test_ask_uses_gemini_when_configured(client, monkeypatch):
     result = ask(client, "anything at all")
     assert (result["service"], result["understood_by"]) == ("ride", "gemini")
     assert result["input"]["destination"] == "Park"
+
+
+@pytest.mark.parametrize("voice", [False, True])
+def test_hindi_ai_clarification_keeps_english_input_verbatim(client, monkeypatch, voice):
+    ok(client.patch("/api/hub/onboarding/profile", json={"language": "hi-IN"}))
+    message = "Please take me somewhere"
+    clarification = "आप कहाँ जाना चाहते हैं?"
+    sent = fake_gemini(
+        monkeypatch, {"service": "ride", "transcript": message, "clarification": clarification}
+    )
+    result = ok(speak(client)) if voice else ask(client, message)
+    assert result["clarification"] == clarification
+    assert result["service"] == "ride" and result["status"] == "needs_details"
+    assert result["input"]["message"] == message and result["quotes"] == []
+    payload = json.loads(sent[0].data)
+    assert "Hindi (Devanagari)" in payload["systemInstruction"]["parts"][0]["text"]
+    stored = ok(client.get("/api/hub/state"))
+    conv = stored["conversations"][0]["id"]
+    transcript = ok(client.get(f"/api/hub/conversations/{conv}/transcript"))["transcript"]
+    assert transcript[0]["text"] == message
+    assert stored["activity"] == []
 
 
 def test_ask_falls_back_to_word_matching_when_gemini_fails(client, monkeypatch):

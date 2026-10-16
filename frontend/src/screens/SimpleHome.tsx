@@ -1,4 +1,5 @@
 import { wordsFor } from '../copy'
+import { useI18n } from '../i18n'
 import { services } from '../route'
 import { setSimple } from '../simple'
 import AskSaathi from '../components/AskSaathi'
@@ -6,12 +7,13 @@ import ServiceIcon from '../components/ServiceIcon'
 import type { Hub } from './hubType'
 
 export default function SimpleHome({ hub }: { hub: Hub }) {
-  const words = wordsFor(hub.state.profile.language)
+  const { language, t } = useI18n()
+  const words = wordsFor(language)
   return (
     <>
       <h1 className="simple-hello">{words.hello(hub.state.profile.name)}</h1>
       <AskSaathi hub={hub} simple />
-      <nav className="simple-tiles" aria-label="Services">
+      <nav className="simple-tiles" aria-label={t('Services', 'सेवाएँ')}>
         {services.map((service) => (
           <a key={service} className="simple-tile" href={`#/request/${service}`}>
             <ServiceIcon service={service} />

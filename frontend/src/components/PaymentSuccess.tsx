@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { formatINR } from '../hub'
 import type { Activity } from '../hub'
+import { useI18n } from '../i18n'
+import { bookingCopy } from '../locales/booking'
 import './PaymentSuccess.css'
 
 export default function PaymentSuccess({ item, onDone }: { item: Activity; onDone: () => void }) {
+  const { t, text } = useI18n()
   const dialog = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => {
@@ -24,7 +27,7 @@ export default function PaymentSuccess({ item, onDone }: { item: Activity; onDon
   return (
     <dialog ref={dialog} className="payment-success" aria-labelledby="payment-success-title" aria-describedby="payment-success-notice" onCancel={(event) => { event.preventDefault(); onDone() }}>
       <div className="payment-success-content">
-        <p className="payment-success-brand">saathi <span className="chip demo">Simulated payment</span></p>
+        <p className="payment-success-brand">{t('saathi', 'साथी')} <span className="chip demo">{text('Simulated payment')}</span></p>
         <div className="payment-success-message">
           <svg className="payment-success-art" viewBox="0 0 240 240" aria-hidden="true" focusable="false">
             <g className="payment-confetti">
@@ -43,12 +46,12 @@ export default function PaymentSuccess({ item, onDone }: { item: Activity; onDon
             <circle className="payment-check-circle" cx="120" cy="120" r="66" />
             <path className="payment-check-stroke" d="m94 121 18 18 38-38" pathLength="1" />
           </svg>
-          <h1 id="payment-success-title" ref={heading} tabIndex={-1}>Payment successful</h1>
+          <h1 id="payment-success-title" ref={heading} tabIndex={-1}>{text('Payment successful')}</h1>
           <p className="payment-success-amount">{formatINR(item.payment!.amount_minor)}</p>
-          <p className="payment-success-booking">{item.title}</p>
-          <p id="payment-success-notice" className="muted">Simulated payment only. No real money was charged.</p>
+          <p className="payment-success-booking">{bookingCopy(item.title, t, text)}</p>
+          <p id="payment-success-notice" className="muted">{text('Simulated payment only. No real money was charged.')}</p>
         </div>
-        <button type="button" className="primary wide" onClick={onDone}>Back to booking</button>
+        <button type="button" className="primary wide" onClick={onDone}>{text('Back to booking')}</button>
       </div>
     </dialog>
   )

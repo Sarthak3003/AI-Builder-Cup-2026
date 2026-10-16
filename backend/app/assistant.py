@@ -20,7 +20,10 @@ RULES = (
     "non-prescription items listed below exist, never prescription medicine. "
     "Use null for unspecified budget or diet. For unsupported, ambiguous, emergency, "
     "medical-advice or allergy requests set clarification and do not propose an action. "
-    "Reply in the user's language when clarifying. Saved preferences and pharmacy items: "
+    "Keep JSON keys, canonical service identifiers (food, ride, medicine), choice numbers, "
+    "booleans and numeric values unchanged. Preserve names, places, medicine items and prices "
+    "verbatim; do not translate or transliterate them. Never translate transcripts or historical "
+    "user messages; an audio transcript must retain the language and script spoken. "
 )
 LISTEN = (
     "The audio is an older person asking Saathi for help, in English, Hindi or a mix. "
@@ -72,9 +75,17 @@ def _generate[Reply: BaseModel](
     if not model or not all(c.isalnum() or c in "-." for c in model):
         raise HTTPException(503, "Gemini model configuration is invalid.")
     context = {field: profile.get(field) for field in ["budget", "vegetarian", "mild"]}
+    language = "hi-IN" if profile.get("language") == "hi-IN" else "en-IN"
+    context["language"] = language
     context["pharmacy_items"] = [product.name for product in PRODUCTS]
+    language_name = "Hindi (Devanagari)" if language == "hi-IN" else "English"
+    instruction = (
+        RULES + "Write newly generated clarification, reason, summary text and suggestions in "
+        f"{language_name}, the saved profile language, even when the input uses another language. "
+        "Saved preferences and pharmacy items: " + json.dumps(context)
+    )
     payload = {
-        "systemInstruction": {"parts": [{"text": RULES + json.dumps(context)}]},
+        "systemInstruction": {"parts": [{"text": instruction}]},
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "responseMimeType": "application/json",
@@ -108,11 +119,12 @@ def hear_request(audio: bytes, mime_type: str, profile: dict) -> Heard:
     return _generate(parts, profile, Heard)
 
 
-def summarise_conversation(transcript: list[dict], confirmed: list[str]) -> Summary:
+def summarise_conversation(
+    transcript: list[dict], confirmed: list[str], *, language: str = "en-IN"
+) -> Summary:
     lines = "\n".join(f"{line['role']}: {line['text']}" for line in transcript)
     text = f"{SUMMARISE}\nCONFIRMED: {json.dumps(confirmed)}\nCONVERSATION:\n{lines}"
-    empty = {"budget": None, "vegetarian": None, "mild": None, "medicines": []}
-    return _generate([{"text": text}], empty, Summary)
+    return _generate([{"text": text}], {"language": language}, Summary)
 
 
 CHOOSE = (
@@ -129,7 +141,7 @@ class Pick(BaseModel):
     reason: str = Field(min_length=1, max_length=160)
 
 
-def choose_offer(quotes: list[dict]) -> Pick:
+def choose_offer(quotes: list[dict], *, language: str = "en-IN") -> Pick:
     options = [
         {
             "choice": number,
@@ -141,4 +153,4 @@ def choose_offer(quotes: list[dict]) -> Pick:
         for number, quote in enumerate(quotes, start=1)
     ]
     text = f"{CHOOSE}\nOPTIONS: {json.dumps(options)}"
-    return _generate([{"text": text}], {}, Pick)
+    return _generate([{"text": text}], {"language": language}, Pick)

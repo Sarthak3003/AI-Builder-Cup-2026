@@ -233,6 +233,29 @@ def test_gemini_can_reweigh_the_pick_and_the_rule_stands_if_it_cannot(owner, mon
     assert [q["option_id"] for q in rides if q.get("recommended")] == ["rapido-auto"]
 
 
+def test_gemini_pick_uses_saved_hindi_without_changing_quote_data(owner, monkeypatch):
+    places = set_up(owner)
+    let_saathi_book(owner)
+    ok(owner.patch("/api/hub/onboarding/profile", json={"language": "hi-IN"}))
+    reason = "Demo Ride: ₹94, लगभग 4 मिनट में।"
+    sent = fake_gemini(monkeypatch, {"choice": 1, "reason": reason})
+    rides = ok(quote(owner, service_type="RIDE", destination_place_id=places["Doctor"]))["quotes"]
+    chosen = rides[0]
+    assert chosen["recommended"] == {"reason": reason, "by": "gemini"}
+    assert (chosen["option_id"], chosen["service_type"], chosen["amount_minor"]) == (
+        "demo-ride",
+        "RIDE",
+        9400,
+    )
+    payload = json.loads(sent[0].data)
+    assert "Hindi (Devanagari)" in payload["systemInstruction"]["parts"][0]["text"]
+    assert HOME["address"] not in str(payload) and DOCTOR["address"] not in str(payload)
+    stored = ok(owner.get("/api/hub/state"))
+    stored_quote = next(q for q in stored["quotes"] if q["id"] == chosen["id"])
+    assert stored_quote["recommended"] == chosen["recommended"]
+    assert stored["activity"] == []
+
+
 def test_saathi_books_its_pick_end_to_end_once_per_retry_key(owner, monkeypatch):
     monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
     places = set_up(owner)

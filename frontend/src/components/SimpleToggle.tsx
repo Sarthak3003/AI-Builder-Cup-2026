@@ -1,10 +1,12 @@
 import { wordsFor } from '../copy'
+import { useI18n } from '../i18n'
 import { setSimple } from '../simple'
 import type { Hub } from '../screens/hubType'
 
 export default function SimpleToggle({ hub }: { hub: Hub }) {
+  const { language } = useI18n()
   const on = Boolean(hub.state.profile.simple)
-  const label = wordsFor(hub.state.profile.language).simpleOn
+  const label = wordsFor(language).simpleOn
   return (
     <div className="card simple-toggle">
       <span id="simple-toggle-label">{label}</span>

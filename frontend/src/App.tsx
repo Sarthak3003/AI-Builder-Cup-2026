@@ -27,6 +27,8 @@ import Overview from './care/Overview'
 import { Approvals, CareActivity, CareDetail } from './care/CareActivity'
 import { CircleSettings, Conversations, Safety } from './care/CareScreens'
 import type { CareHub } from './care/careHub'
+import { useI18n } from './i18n'
+import LanguageProvider from './LanguageProvider'
 import './theme.css'
 import './App.css'
 
@@ -53,6 +55,11 @@ function pageTitle(route: Route): string {
 }
 
 export default function App() {
+  return <LanguageProvider><AppContent /></LanguageProvider>
+}
+
+function AppContent() {
+  const { language, setLanguage, t, text } = useI18n()
   const [state, setState] = useState<HubState | CareState | null>(null)
   const { busy, error, notice, run, setError, setNotice } = useRunner()
   const [route, go] = useRoute()
@@ -96,8 +103,8 @@ export default function App() {
 
   const care = state?.role === 'caregiver' ? state : null
   const owner = state?.role === 'owner' ? state : null
-  const language = owner ? owner.profile.language : care?.owner.language
-  useEffect(() => { document.documentElement.lang = language === 'hi-IN' ? 'hi' : 'en' }, [language])
+  const savedLanguage = owner ? owner.profile.language : care?.owner.language
+  useEffect(() => { if (savedLanguage) setLanguage(savedLanguage) }, [savedLanguage, state?.role, setLanguage])
 
   // A brand-new owner starts in setup once; Save and exit later returns them to Home.
   const setupChecked = useRef(false)
@@ -109,12 +116,15 @@ export default function App() {
   }, [owner, route.page, go])
 
   // Announce each screen: new title, and move keyboard and screen-reader focus to the top of the content.
-  const title = pageTitle(route)
+  const title = route.page === 'home' ? t('Home', 'होम') : text(pageTitle(route))
   useEffect(() => {
-    document.title = `${title} · Saathi`
+    document.title = `${title} · ${language === 'hi-IN' ? 'साथी' : 'Saathi'}`
+  }, [title, language])
+  const routeTitle = pageTitle(route)
+  useEffect(() => {
     if (firstRoute.current) { firstRoute.current = false; return }
     main.current?.focus()
-  }, [title])
+  }, [routeTitle])
 
   const hub: Hub | null = owner ? { state: owner, busy, online, run, refresh, setState, notify: setNotice } : null
   const careHub: CareHub | null = care ? { state: care, busy, run, refresh, notify: setNotice } : null
@@ -125,16 +135,16 @@ export default function App() {
     { page: 'home', label: words.home, icon: <HomeIcon /> },
     { page: 'activity', label: words.activity, icon: <ActivityIcon /> },
     { page: 'services', label: words.services, icon: <AppsIcon /> },
-    { page: 'family', label: words.family, icon: <FamilyIcon />, badge: alerts, badgeLabel: 'needing attention' },
+    { page: 'family', label: words.family, icon: <FamilyIcon />, badge: alerts, badgeLabel: t('needing attention', 'ध्यान देने की ज़रूरत') },
     { page: 'profile', label: words.profile, icon: <ProfileIcon /> },
   ]
   const careAlerts = care?.events.filter((event) => event.status === 'open' && event.kind !== 'approval_needed').length ?? 0
   const careTabs: Tab[] = [
-    { page: 'home', label: 'Overview', icon: <HomeIcon /> },
-    { page: 'activity', label: 'Activity', icon: <ActivityIcon /> },
-    { page: 'approvals', label: 'Approvals', icon: <FamilyIcon />, badge: care?.approvals.length ?? 0 },
-    { page: 'conversations', label: 'Chats', icon: <AppsIcon /> },
-    { page: 'safety', label: 'Safety', icon: <ProfileIcon />, badge: careAlerts, badgeLabel: 'alerts to review' },
+    { page: 'home', label: t('Overview', 'एक नज़र में'), icon: <HomeIcon /> },
+    { page: 'activity', label: text('Activity'), icon: <ActivityIcon /> },
+    { page: 'approvals', label: text('Approvals'), icon: <FamilyIcon />, badge: care?.approvals.length ?? 0 },
+    { page: 'conversations', label: t('Chats', 'बातचीत'), icon: <AppsIcon /> },
+    { page: 'safety', label: text('Safety'), icon: <ProfileIcon />, badge: careAlerts, badgeLabel: t('alerts to review', 'देखने योग्य सूचनाएँ') },
   ]
   const tabs = care ? careTabs : simple ? ownerTabs.slice(0, 2) : ownerTabs
 
@@ -181,37 +191,37 @@ export default function App() {
     if (hub) return ownerScreen(hub)
     return (
       <section className="card">
-        <h1 className="page-title">Your everyday companion</h1>
-        <p>Opening your demo. No sign-in needed.</p>
-        <button className="primary wide" disabled={busy || !online} onClick={() => void start()}>Connect</button>
+        <h1 className="page-title">{t('Your everyday companion', 'आपका रोज़मर्रा का साथी')}</h1>
+        <p>{t('Opening your demo. No sign-in needed.', 'आपका डेमो खुल रहा है। साइन-इन की ज़रूरत नहीं है।')}</p>
+        <button className="primary wide" disabled={busy || !online} onClick={() => void start()}>{t('Connect', 'जुड़ें')}</button>
       </section>
     )
   }
 
   return (
     <div className={`app${owner?.profile.large_text ? ' large-text' : ''}${owner?.profile.high_contrast ? ' high-contrast' : ''}${simple ? ' simple' : ''}${care ? ' care' : ''}`}>
-      <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); main.current?.focus() }}>Skip to content</a>
+      <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); main.current?.focus() }}>{t('Skip to content', 'मुख्य सामग्री पर जाएँ')}</a>
       <div className="frame">
         <OfflineBanner online={online} />
         <header className="topbar">
-          <a className="brand" href="#/" aria-label="Saathi home"><LogoMark size={34} /><span className="wordmark">saathi</span></a>
-          <span className="chip demo">{care ? 'Care Circle · demo' : 'Prototype'}</span>
-          {care ? <a className="avatar" href="#/circle" aria-label="Care Circle and settings">{care.grant.name.slice(0, 1)}</a> : null}
-          {owner && !simple ? <a className="avatar" href="#/profile" aria-label="Open profile">{owner.profile.name.slice(0, 1)}</a> : null}
+          <a className="brand" href="#/" aria-label={t('Saathi home', 'साथी का होम पेज')}><LogoMark size={34} /><span className="wordmark">{t('saathi', 'साथी')}</span></a>
+          <span className="chip demo">{care ? t('Care Circle · demo', 'केयर सर्कल · डेमो') : t('Prototype', 'प्रोटोटाइप')}</span>
+          {care ? <a className="avatar" href="#/circle" aria-label={t('Care Circle and settings', 'केयर सर्कल और सेटिंग्स')}>{care.grant.name.slice(0, 1)}</a> : null}
+          {owner && !simple ? <a className="avatar" href="#/profile" aria-label={t('Open profile', 'प्रोफ़ाइल खोलें')}>{owner.profile.name.slice(0, 1)}</a> : null}
         </header>
 
         <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
           {error ? (
             <div className="error" role="alert">
-              <p>{error}</p>
+              <p>{text(error)}</p>
               <div className="actions">
-                <button className="secondary" onClick={() => void run(state ? refresh : start)}>Retry connection</button>
-                <button className="secondary" onClick={() => void run(async () => { await api('/session', 'DELETE'); setState(null); await start() })}>Start a new demo session</button>
+                <button className="secondary" onClick={() => void run(state ? refresh : start)}>{t('Retry connection', 'फिर जुड़ने की कोशिश करें')}</button>
+                <button className="secondary" onClick={() => void run(async () => { await api('/session', 'DELETE'); setState(null); await start() })}>{t('Start a new demo session', 'नया डेमो सत्र शुरू करें')}</button>
               </div>
             </div>
           ) : null}
-          {notice ? <p className="notice" role="status">{notice}</p> : null}
-          {busy ? <p className="busy" role="status">Saving your request…</p> : null}
+          {notice ? <p className="notice" role="status">{text(notice)}</p> : null}
+          {busy ? <p className="busy" role="status">{t('Saving your request…', 'आपका अनुरोध सहेजा जा रहा है…')}</p> : null}
           {content()}
         </main>
 
@@ -219,8 +229,8 @@ export default function App() {
           {simple ? <p>{words.notEmergency}</p> : (
             <>
               <ConnectionStatus />
-              <p>Saathi cannot respond to emergencies. Contact local emergency services directly.</p>
-              <a href="#/about">About this demo</a>
+              <p>{t('Saathi cannot respond to emergencies. Contact local emergency services directly.', 'साथी आपात स्थिति में मदद नहीं कर सकता। सीधे स्थानीय आपातकालीन सेवाओं से संपर्क करें।')}</p>
+              <a href="#/about">{t('About this demo', 'इस डेमो के बारे में')}</a>
             </>
           )}
         </footer>

@@ -646,8 +646,8 @@ def hub_router(config: Settings):
         if not any(q.get("recommended") for q in quotes):
             return result
         try:
-            mutate(who, ai_profile, owner_only=True)
-            pick = choose_offer(quotes)
+            profile = mutate(who, ai_profile, owner_only=True)
+            pick = choose_offer(quotes, language=profile.get("language", "en-IN"))
         except HTTPException:
             return result
         if pick.choice > len(quotes):
@@ -1119,11 +1119,15 @@ def hub_router(config: Settings):
             conv = conversation_for(state, who, conversation_id, "view_summaries")
             if conv.get("transcript_expires_at", time.time() + 1) <= time.time():
                 raise HTTPException(410, "The phone transcript retention period has ended.")
-            ai_profile(state)
-            return conv["transcript"], summarise(conv, state)["confirmed"]
+            profile = ai_profile(state)
+            return (
+                conv["transcript"],
+                summarise(conv, state)["confirmed"],
+                profile.get("language", "en-IN"),
+            )
 
-        lines, confirmed = mutate(who, prepare)
-        drafted = summarise_conversation(lines, confirmed)
+        lines, confirmed, language = mutate(who, prepare)
+        drafted = summarise_conversation(lines, confirmed, language=language)
 
         def store_summary(state):
             conv = find(state["conversations"], conversation_id, "conversation")

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useI18n } from '../i18n'
 import { api, live } from '../hub'
 import type { Activity } from '../hub'
 import { applyFilters, noFilters } from '../filters'
@@ -10,16 +11,17 @@ import { UpcomingPlans } from '../components/Plans'
 import type { Hub } from './hubType'
 
 export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simple?: boolean }) {
+  const { t, text, formatWhen } = useI18n()
   const { state, busy, run, refresh } = hub
   const [filters, setFilters] = useState(noFilters)
   const cancel = (item: Activity) => live(item) ? (
-    <button className="secondary" disabled={busy} onClick={() => void run(async () => { await api(`/bookings/${item.id}/cancel`, 'POST'); await refresh() })}>Cancel booking</button>
+    <button className="secondary" disabled={busy} onClick={() => void run(async () => { await api(`/bookings/${item.id}/cancel`, 'POST'); await refresh() })}>{t('Cancel booking', 'बुकिंग रद्द करें')}</button>
   ) : null
   if (simple) {
     return (
       <>
-        <h1 className="page-title">Your activity</h1>
-        <ActivityList items={state.activity} simple actions={cancel} empty={<p>Nothing yet.</p>} />
+        <h1 className="page-title">{t('Your activity', 'आपकी गतिविधि')}</h1>
+        <ActivityList items={state.activity} simple actions={cancel} empty={<p>{t('Nothing yet.', 'अभी कुछ नहीं है।')}</p>} />
         <PhoneHistory conversations={state.conversations ?? []} />
       </>
     )
@@ -27,27 +29,27 @@ export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simp
   const shown = applyFilters(state.activity, filters)
   return (
     <>
-      <h1 className="page-title">Your activity</h1>
-      <p className="muted">Rides, meals, medicine requests and plans, whichever way you ask. All bookings and payments are simulated.</p>
+      <h1 className="page-title">{t('Your activity', 'आपकी गतिविधि')}</h1>
+      <p className="muted">{t('Rides, meals, medicine requests and plans, whichever way you ask. All bookings and payments are simulated.', 'सवारियाँ, भोजन, दवा अनुरोध और योजनाएँ — आप चाहे जैसे अनुरोध करें। सभी बुकिंग और भुगतान केवल डेमो हैं।')}</p>
       <UpcomingPlans runner={hub} appointments={state.appointments ?? []} reminders={state.reminders ?? []} canEdit canMarkDone canMedicine />
-      <h2 className="section-title">History</h2>
+      <h2 className="section-title">{t('History', 'पिछली गतिविधियाँ')}</h2>
       <PhoneHistory conversations={state.conversations ?? []} />
       <ActivityFilters filters={filters} onChange={setFilters} />
       <ActivityList
         items={shown}
         actions={cancel}
-        empty={state.activity.length ? <p>Nothing matches these filters.</p> : <><h2>A fresh start</h2><p>Your first request will appear here.</p><a className="primary" href="#/">Explore services</a></>}
+        empty={state.activity.length ? <p>{t('Nothing matches these filters.', 'इन फ़िल्टर से मेल खाती कोई गतिविधि नहीं है।')}</p> : <><h2>{t('A fresh start', 'एक नई शुरुआत')}</h2><p>{t('Your first request will appear here.', 'आपका पहला अनुरोध यहाँ दिखाई देगा।')}</p><a className="primary" href="#/">{t('Explore services', 'सेवाएँ देखें')}</a></>}
       />
       <section className="card" aria-labelledby="timeline-title">
-        <h2 id="timeline-title">Timeline</h2>
-        <p className="muted">The same record your Care Circle sees, minus anything you have not shared with them.</p>
+        <h2 id="timeline-title">{t('Timeline', 'घटनाक्रम')}</h2>
+        <p className="muted">{t('The same record your Care Circle sees, minus anything you have not shared with them.', 'आपकी देखभाल मंडली यही रिकॉर्ड देखती है, लेकिन वह जानकारी नहीं जो आपने उनके साथ साझा नहीं की है।')}</p>
         <ActivityTimeline events={state.events ?? []} />
       </section>
       <details className="audit">
-        <summary>Who did what</summary>
+        <summary>{t('Who did what', 'किसने क्या किया')}</summary>
         <ul>
           {state.audit.slice().reverse().map((event, index) => (
-            <li key={index}>{event.event.replaceAll('_', ' ')}{event.actor && event.actor !== 'owner' ? ` · by ${event.actor}` : ''} · {new Date(event.at * 1000).toLocaleTimeString()}</li>
+            <li key={index}>{text(event.event.replaceAll('_', ' '))}{event.actor && event.actor !== 'owner' ? t(' · by {{actor}}', ' · {{actor}} द्वारा', { actor: event.actor }) : ''} · {formatWhen(event.at)}</li>
           ))}
         </ul>
       </details>

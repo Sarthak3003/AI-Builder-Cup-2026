@@ -106,7 +106,7 @@ test('the owner can change what is shared, remove a person and ask for help', as
   await userEvent.click(screen.getByRole('checkbox', { name: 'Rides' }))
   const saved = calls.find((call) => call.method === 'PUT')?.body as HubState['profile']
   expect(saved.sharing).toEqual({ ride: false, food: true, medicine: true, appointments: true })
-  await userEvent.click(within(person).getByRole('button', { name: 'Remove' }))
+  await userEvent.click(within(person).getByRole('button', { name: 'Remove Asha from the Care Circle' }))
   expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/care-circle/g1'))).toBe(true)
   await userEvent.click(screen.getByRole('button', { name: 'Ask my Care Circle for help' }))
   expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'help' })
@@ -242,7 +242,7 @@ test('upcoming plans flag missed reminders without claiming a medicine was taken
   render(<App />)
   expect(await screen.findByText('Missed · follow up')).toBeInTheDocument()
   expect(screen.getByText('A reminder is not proof that a medicine was taken.')).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: "I've done this" }))
+  await userEvent.click(screen.getByRole('button', { name: "I've done this: Reorder BP tablet" }))
   expect(calls.some((call) => call.url.endsWith('/reminders/r1/done'))).toBe(true)
 })
 

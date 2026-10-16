@@ -25,19 +25,19 @@ test('a brand-new person is taken to setup once, step 1 of 7, with the demo expl
 })
 
 test('continue saves the step on the server and moves on, focusing the new step', async () => {
-  const calls = stubApi({ 'PATCH /onboarding/profile': () => fresh({ onboarding: progress(1) }) }, fresh())
+  const calls = stubApi({ 'PATCH /onboarding/profile': () => fresh({ onboarding: progress(1), profile: { ...makeState().profile, language: 'hi-IN' } }) }, fresh())
   window.location.hash = '#/onboarding'
   render(<App />)
   await userEvent.type(await screen.findByRole('textbox', { name: 'What should Saathi call you?' }), 'Meera')
   await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Preferred language' }), 'hi-IN')
-  await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
-  expect(await screen.findByRole('heading', { name: 'Comfort and accessibility' })).toHaveFocus()
+  await userEvent.click(screen.getByRole('button', { name: 'आगे बढ़ें' }))
+  expect(await screen.findByRole('heading', { name: 'सुविधा और सुलभता' })).toHaveFocus()
   expect(window.location.hash).toBe('#/onboarding/accessibility')
   expect(sent(calls, 'PATCH', '/onboarding/profile')).toEqual([{ step: 'welcome', name: 'Meera', language: 'hi-IN' }])
 
-  await userEvent.click(screen.getByRole('checkbox', { name: 'Larger text' }))
-  await userEvent.click(screen.getByRole('radio', { name: 'Speaking' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+  await userEvent.click(screen.getByRole('checkbox', { name: 'बड़े अक्षर' }))
+  await userEvent.click(screen.getByRole('radio', { name: 'बोलकर' }))
+  await userEvent.click(screen.getByRole('button', { name: 'आगे बढ़ें' }))
   await waitFor(() => expect(sent(calls, 'PATCH', '/onboarding/profile')).toHaveLength(2))
   expect(sent(calls, 'PATCH', '/onboarding/profile')[1]).toEqual({
     step: 'accessibility', large_text: true, high_contrast: false, simple: false, read_aloud: false, offer_help: true, channel: 'voice',

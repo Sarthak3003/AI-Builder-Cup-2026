@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useI18n } from './i18n'
 
 type Connection =
   | { state: 'checking' }
@@ -6,6 +7,7 @@ type Connection =
   | { state: 'offline' }
 
 export default function ConnectionStatus() {
+  const { t } = useI18n()
   const [connection, setConnection] = useState<Connection>({ state: 'checking' })
   const [attempt, setAttempt] = useState(0)
 
@@ -49,12 +51,12 @@ export default function ConnectionStatus() {
       <p role="status" className={connection.state}>
         <span className="status-dot" aria-hidden="true" />
         {connection.state === 'checking'
-          ? 'Connecting to Saathi…'
+          ? t('Connecting to Saathi…', 'Saathi से जुड़ रहे हैं…')
           : connection.state === 'online'
-            ? `Backend connected · v${connection.version}`
-            : 'Backend unavailable'}
+            ? t('Backend connected · v{{version}}', 'बैकएंड से जुड़ गए · v{{version}}', { version: connection.version })
+            : t('Backend unavailable', 'बैकएंड उपलब्ध नहीं है')}
       </p>
-      {connection.state === 'offline' ? <button className="secondary" onClick={retry}>Try again</button> : null}
+      {connection.state === 'offline' ? <button className="secondary" onClick={retry}>{t('Try again', 'फिर कोशिश करें')}</button> : null}
     </div>
   )
 }

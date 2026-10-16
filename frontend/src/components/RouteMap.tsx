@@ -1,3 +1,5 @@
+import { useI18n } from '../i18n'
+
 type Stage = 'coming' | 'done' | 'idle'
 type Props = { stage: Stage; mover?: 'car' | 'scooter'; start?: string; end?: string; tall?: boolean }
 
@@ -6,6 +8,7 @@ const labelWidth = (text: string) => text.length * 6.4 + 14
 
 // A drawn sketch, not a live map: nothing is tracked and no vehicle or rider exists.
 export default function RouteMap({ stage, mover = 'car', start, end, tall = false }: Props) {
+  const { text } = useI18n()
   const height = tall ? 220 : 150
   const at = stage === 'done' ? 'translate(300 40)' : mover === 'car' ? 'translate(96 118)' : 'translate(100 118)'
   const from = start ? short(start) : ''
@@ -41,7 +44,7 @@ export default function RouteMap({ stage, mover = 'car', start, end, tall = fals
           )}
         </g>
       </svg>
-      <span className="chip demo map-chip">Demo map · not live</span>
+      <span className="chip demo map-chip">{text('Demo map · not live')}</span>
     </div>
   )
 }
