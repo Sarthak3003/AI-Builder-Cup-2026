@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
-import type { HubState } from './hub'
+import type { HubState, Profile } from './hub'
 import { demoServices, fail, makeState, progress, stubApi } from './test-utils'
 
 beforeEach(() => { window.history.replaceState(null, '', '/') })
@@ -41,7 +41,49 @@ test('continue saves the step on the server and moves on, focusing the new step'
   await waitFor(() => expect(sent(calls, 'PATCH', '/onboarding/profile')).toHaveLength(2))
   expect(sent(calls, 'PATCH', '/onboarding/profile')[1]).toEqual({
     step: 'accessibility', large_text: true, high_contrast: false, simple: false, read_aloud: false, offer_help: true, channel: 'voice',
+    show_options: true,
   })
+})
+
+test.each([true, false])('setup saves booking choice %s through Continue, Back and a reload', async (showOptions) => {
+  let saved = fresh({ onboarding: progress(1) })
+  const calls = stubApi({
+    'POST /session': () => saved,
+    'PATCH /onboarding/profile': (body) => {
+      const { step: _step, ...patch } = body as Partial<Profile> & { step: string }
+      saved = { ...saved, profile: { ...saved.profile, ...patch }, onboarding: { ...progress(2), review: { ...progress(2).review, show_options: patch.show_options ?? true } } }
+      return saved
+    },
+  }, saved)
+  window.location.hash = '#/onboarding/accessibility'
+  const { unmount } = render(<App />)
+  const group = await screen.findByRole('group', { name: 'When I ask for a ride or a meal' })
+  expect(within(group).getByRole('radio', { name: 'Show me the options and let me confirm' })).toBeChecked()
+  expect(screen.getByText('Telephone calls always ask you to confirm. Care Circle approval rules still apply.')).toBeInTheDocument()
+  const label = showOptions ? 'Show me the options and let me confirm' : 'Let Saathi choose the best option and book it for me'
+  await userEvent.click(within(group).getByRole('radio', { name: label }))
+  expect(sent(calls, 'PATCH', '/onboarding/profile')).toHaveLength(0)
+  await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+  expect(await screen.findByRole('heading', { name: 'Saved places' })).toBeInTheDocument()
+  expect(sent(calls, 'PATCH', '/onboarding/profile')[0]).toEqual(expect.objectContaining({ step: 'accessibility', show_options: showOptions }))
+  await userEvent.click(screen.getByRole('button', { name: 'Back' }))
+  expect(await screen.findByRole('radio', { name: label })).toBeChecked()
+  unmount()
+  render(<App />)
+  expect(await screen.findByRole('radio', { name: label })).toBeChecked()
+})
+
+test('Save and exit persists the setup booking preference for Profile', async () => {
+  const saved = fresh({ onboarding: progress(2), profile: { ...makeState().profile, show_options: false } })
+  const calls = stubApi({ 'PATCH /onboarding/profile': () => saved }, fresh({ onboarding: progress(1) }))
+  window.location.hash = '#/onboarding/accessibility'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('radio', { name: 'Let Saathi choose the best option and book it for me' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Save and exit' }))
+  expect(await screen.findByRole('heading', { name: 'Finish setting up Saathi' })).toBeInTheDocument()
+  expect(sent(calls, 'PATCH', '/onboarding/profile')[0]).toEqual(expect.objectContaining({ show_options: false }))
+  await userEvent.click(screen.getByRole('link', { name: 'Open profile' }))
+  expect(await screen.findByRole('radio', { name: 'Let Saathi choose the best option and book it for me' })).toBeChecked()
 })
 
 test('a returning person resumes at the first unfinished step', async () => {
@@ -131,11 +173,25 @@ test('the review summarises every answer, links back to edit, and finishing need
   expect(screen.getByText('Ravi can see shared activity (view only)')).toBeInTheDocument()
   expect(screen.getByText('Demo wallet (simulated) · no real money moves')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Change saved places' })).toHaveAttribute('href', '#/onboarding/places')
+  expect(screen.getByText('Show me the options and let me confirm')).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Change booking preference' })).toHaveAttribute('href', '#/onboarding/accessibility')
   expect(sent(calls, 'POST', '/onboarding/finish')).toEqual([])
   await userEvent.click(screen.getByRole('button', { name: 'Yes, finish setup' }))
   expect(await screen.findByRole('heading', { name: 'You are all set, Meera' })).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Try a demo ride' })).toHaveAttribute('href', '#/request/ride')
   expect(sent(calls, 'POST', '/onboarding/finish')).toEqual([{ confirmed: true }])
+})
+
+test('review and completion reflect automatic booking rather than promising another confirmation', async () => {
+  const profile = { ...makeState().profile, name: 'Meera', show_options: false }
+  const ready = fresh({ profile, onboarding: { ...progress(6), review: { ...progress(6).review, show_options: false, missing: [] } } })
+  stubApi({ 'POST /onboarding/finish': () => makeState({ profile }) }, ready)
+  window.location.hash = '#/onboarding/review'
+  render(<App />)
+  expect(await screen.findByText('Let Saathi choose the best option and book it for me')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Yes, finish setup' }))
+  expect(await screen.findByText(/Saathi will choose and book app rides and meals for you/)).toBeInTheDocument()
+  expect(screen.queryByText(/check with you before every booking/)).not.toBeInTheDocument()
 })
 
 test('finishing is blocked while a required step is missing', async () => {

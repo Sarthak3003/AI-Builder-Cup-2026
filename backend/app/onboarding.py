@@ -119,6 +119,7 @@ class ProfilePatch(BaseModel):
     channel: Literal["app", "voice", "message"] | None = None
     read_aloud: bool | None = None
     offer_help: bool | None = None
+    show_options: bool | None = Field(default=None, strict=True)
     caregiver_enabled: bool | None = None
     approval_limit: int | None = Field(default=None, ge=0, le=10000)
     payment_method: PaymentMethod | None = None
@@ -252,6 +253,7 @@ def review(state: dict) -> dict:
         "language": profile.get("language", "en-IN"),
         "channel": CHANNELS.get(profile.get("channel", "app"), ""),
         "comfort": comfort,
+        "show_options": profile.get("show_options") is not False,
         "places": [place["label"] for place in state["places"]],
         "pickup": pickup["label"] if pickup else None,
         "services": [

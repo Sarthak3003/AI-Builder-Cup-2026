@@ -49,6 +49,7 @@ export function progress(done: 'done' | number = 'done'): Progress {
     completed_at: done === 'done' ? 1 : null, started_at: count ? 1 : null,
     review: {
       name: 'Meera', language: 'en-IN', channel: 'Tapping in the app', comfort: ['Larger text'], places: ['Home', 'Doctor'], pickup: 'Home',
+      show_options: true,
       services: demoServices().map((s) => ({ service_type: s.service_type, provider_label: s.provider_label, status: s.status })),
       payment: 'Demo wallet (simulated)', care_circle: [{ name: 'Ravi', role: 'viewer', permissions: ['view_activity'] }], approval_rule: '',
       missing: done === 'done' ? [] : ['Payment (simulated)'],

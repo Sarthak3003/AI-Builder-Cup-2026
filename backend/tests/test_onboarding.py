@@ -64,6 +64,7 @@ def after_places(api):
 def test_a_new_session_starts_at_the_welcome_step(owner):
     progress = flow(owner)
     assert progress["current"] == "welcome" and progress["completed"] is False
+    assert progress["review"]["show_options"] is True
     assert [step["id"] for step in progress["steps"]] == [
         "welcome",
         "accessibility",
@@ -95,6 +96,9 @@ def test_each_step_is_validated_on_the_server(owner):
         {"language": "fr-FR"},
         {"payment_method": "CARD"},
         {"channel": "fax"},
+        {"show_options": "automatic"},
+        {"show_options": "false"},
+        {"show_options": 0},
         {"card_number": "4111111111111111"},
         {"upi_pin": "1234"},
         {"step": "review"},
@@ -110,6 +114,39 @@ def test_each_step_is_validated_on_the_server(owner):
         assert owner.post("/api/hub/onboarding/locations", json=place).status_code == 422
     assert owner.post("/api/hub/onboarding/steps/unknown", json={}).status_code == 404
     assert flow(owner)["current"] == "welcome"
+
+
+@pytest.mark.parametrize("show_options", [True, False])
+def test_setup_booking_preference_persists_and_review_follows_edits(owner, show_options):
+    through_places(owner)
+    saved = ok(
+        owner.patch(
+            "/api/hub/onboarding/profile",
+            json={"step": "accessibility", "show_options": show_options},
+        )
+    )
+    assert saved["profile"]["show_options"] is show_options
+    assert saved["onboarding"]["review"]["show_options"] is show_options
+    cookie = owner.cookies.get("__session")
+    with TestClient(create_app(Settings(environment="test"))) as restarted:
+        restarted.cookies.set("__session", cookie)
+        assert flow(restarted)["review"]["show_options"] is show_options
+        after_places(restarted)
+        done = ok(restarted.post("/api/hub/onboarding/finish", json={"confirmed": True}))
+        assert done["profile"]["show_options"] is show_options
+        welcome(restarted, "Meera Devi")
+        assert flow(restarted)["review"]["show_options"] is show_options
+        edited = ok(
+            restarted.patch(
+                "/api/hub/onboarding/profile",
+                json={"step": "accessibility", "show_options": not show_options},
+            )
+        )
+        assert edited["onboarding"]["completed"] is True
+        assert edited["onboarding"]["review"]["show_options"] is not show_options
+        assert edited["profile"]["payment_method"] == "DEMO_WALLET"
+        assert [place["label"] for place in edited["places"]] == ["Home", "Doctor"]
+        assert edited["activity"] == []
 
 
 def test_places_need_one_usual_pickup_and_labels_are_unique(owner):
@@ -195,6 +232,7 @@ def test_onboarding_grants_are_view_only_or_view_and_approve(app, owner):
         for method, path, body in [
             ("get", "/api/hub/onboarding", None),
             ("patch", "/api/hub/onboarding/profile", {"payment_method": "PAY_ON_COMPLETION"}),
+            ("patch", "/api/hub/onboarding/profile", {"show_options": False}),
             ("post", "/api/hub/onboarding/locations", HOME),
             ("post", "/api/hub/onboarding/caretaker-grants", {"name": "Eve"}),
             ("post", "/api/hub/onboarding/finish", {"confirmed": True}),

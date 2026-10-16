@@ -10,6 +10,7 @@ export type PaymentMethod = 'DEMO_WALLET' | 'PAY_ON_COMPLETION'
 export type StepId = 'welcome' | 'accessibility' | 'places' | 'care_circle' | 'services' | 'payment' | 'review'
 export type Review = {
   name: string; language: Profile['language']; channel: string; comfort: string[]; places: string[]; pickup: string | null;
+  show_options: boolean;
   services: { service_type: ServiceType; provider_label: string; status: ConnectionStatus }[]; payment: string | null;
   care_circle: { name: string; role: Role; permissions: string[] }[]; approval_rule: string; missing: string[];
 }

@@ -5,6 +5,7 @@ import type { Channel, HubState, PaymentMethod, StepId } from '../hub'
 import { setupSteps } from '../route'
 import ServiceConnectionCard from '../components/ServiceConnectionCard'
 import PlacesEditor from '../components/PlacesEditor'
+import BookingPreference from '../components/BookingPreference'
 import type { Hub } from '../screens/hubType'
 
 type Nav = { next: () => void; back?: () => void; exit: () => void }
@@ -51,7 +52,7 @@ function WelcomeStep({ hub, nav }: StepProps) {
   const save = () => saveStep(hub, '/onboarding/profile', 'PATCH', { step: 'welcome', name, language })
   return (
     <form onSubmit={submitter(hub, nav, save)}>
-      <p className="lead">Saathi helps you get a ride, a meal or everyday pharmacy items by asking in your own words. You always see the price and confirm before anything is booked.</p>
+      <p className="lead">Saathi helps you get a ride, a meal or everyday pharmacy items by asking in your own words. During setup, choose whether to compare ride and meal prices yourself or let Saathi choose and book for you.</p>
       <div className="card demo-note">
         <h2>This is a demo</h2>
         <p>Every provider, booking and payment here is simulated. No real driver, order or money is involved.</p>
@@ -84,6 +85,7 @@ function AccessibilityStep({ hub, nav }: StepProps) {
   const [prefs, setPrefs] = useState({
     large_text: profile.large_text, high_contrast: profile.high_contrast, simple: Boolean(profile.simple),
     read_aloud: Boolean(profile.read_aloud), offer_help: profile.offer_help ?? true, channel: profile.channel ?? 'app',
+    show_options: profile.show_options !== false,
   })
   const save = () => saveStep(hub, '/onboarding/profile', 'PATCH', { step: 'accessibility', ...prefs })
   return (
@@ -104,6 +106,7 @@ function AccessibilityStep({ hub, nav }: StepProps) {
         <legend>Extra help</legend>
         <label className="check-row"><input type="checkbox" checked={prefs.offer_help} onChange={(event) => setPrefs({ ...prefs, offer_help: event.target.checked })} />If something goes wrong, offer to ask my Care Circle for help</label>
       </fieldset>
+      <BookingPreference showOptions={prefs.show_options} onChange={(value) => setPrefs({ ...prefs, show_options: value })} disabled={hub.busy} />
       <p className="muted">These start with safe settings. You can change them any time in Profile.</p>
       <Actions hub={hub} nav={nav} step="accessibility" exitSave={save} />
     </form>
@@ -235,6 +238,7 @@ function ReviewStep({ hub, nav, onFinish }: StepProps & { onFinish: () => void }
       <dl className="review-list">
         <div><dt>About you</dt><dd>{review.name || 'No name yet'} · {review.language === 'hi-IN' ? 'Hindi' : 'English'}</dd>{change('welcome', 'your name and language')}</div>
         <div><dt>Comfort</dt><dd>{review.comfort.length ? review.comfort.join(', ') : 'Standard settings'} · Prefers {review.channel.toLowerCase()}</dd>{change('accessibility', 'comfort settings')}</div>
+        <div><dt>Ride and meal bookings</dt><dd>{review.show_options === false ? 'Let Saathi choose the best option and book it for me' : 'Show me the options and let me confirm'}</dd>{change('accessibility', 'booking preference')}</div>
         <div><dt>Places</dt><dd>{review.places.length ? `${review.places.join(', ')} · usual pickup: ${review.pickup}` : 'None yet'}</dd>{change('places', 'saved places')}</div>
         <div><dt>Care Circle</dt><dd>{review.care_circle.length ? review.care_circle.map((p) => `${p.name} ${roleText(p.permissions)}`).join('; ') : 'No one added'}{review.approval_rule ? `. ${review.approval_rule}` : ''}</dd>{change('care_circle', 'Care Circle')}</div>
         <div><dt>Demo services</dt><dd>{review.services.map((s) => `${s.provider_label}: ${s.status === 'CONNECTED' ? 'connected' : 'not connected'}`).join('; ')}</dd>{change('services', 'demo services')}</div>
@@ -258,7 +262,7 @@ function Finished({ hub }: { hub: Hub }) {
   return (
     <section className="receipt card" aria-labelledby="finished-title">
       <h2 id="finished-title" className="step-title">You are all set, {name}</h2>
-      <p className="lead">Your setup is saved. Saathi will check with you before every booking, and everything stays simulated.</p>
+      <p className="lead">Your setup is saved. {hub.state.profile.show_options === false ? 'Saathi will choose and book app rides and meals for you. Medicine requests and telephone calls still ask first.' : 'Saathi will check with you before every booking.'} Everything stays simulated.</p>
       {ride?.status === 'CONNECTED' ? <a className="primary wide" href="#/request/ride">Try a demo ride</a> : <a className="primary wide" href="#/services">Connect a demo service</a>}
       <a className="secondary wide" href="#/">Go to Home</a>
     </section>
