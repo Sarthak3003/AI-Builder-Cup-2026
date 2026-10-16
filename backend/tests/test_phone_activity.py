@@ -12,6 +12,27 @@ from app.config import Settings
 from app.hub_store import HubStore
 
 
+def test_call_history_follows_caretaker_decision_after_hangup(owner):
+    profile = state(owner)["profile"]
+    profile.update(caregiver_enabled=True, approval_limit=1)
+    ok(owner.put("/api/hub/profile", json=profile))
+    invite = ok(owner.post("/api/hub/care-circle", json={"name": "Asha", "role": "approver"}))
+    call = Call(owner)
+    call.pair(owner)
+    call.say("Book a cab to Doctor")
+    call.say("Home")
+    call.digits("1")
+    before = ok(owner.get("/api/hub/snapshot"))
+    assert before["conversations"][0]["workflow_state"] == "AWAITING_EXTERNAL_APPROVAL"
+    with TestClient(owner.app) as asha:
+        ok(asha.post("/api/hub/caregiver/join", json={"code": invite["code"]}))
+        item = before["activity"][0]
+        ok(asha.post(f"/api/hub/bookings/{item['id']}/decision", json={"action": "approve"}))
+    after = ok(owner.get("/api/hub/snapshot"))["conversations"][0]
+    assert after["workflow_state"] == "COMPLETED"
+    assert after["call_status"] == "ENDED" and after["status"] == "CONFIRMED_SIMULATED"
+
+
 def test_call_history_refresh_metadata_and_read_only_polling(owner):
     call = Call(owner)
     call.pair(owner, retain=True)

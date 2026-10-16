@@ -264,6 +264,14 @@ def conversation_view(conv, state, perms=None):
             ),
             booking_id=item["id"] if item else None,
         )
+        if item and view["workflow_state"] == "AWAITING_EXTERNAL_APPROVAL":
+            view["workflow_state"] = {
+                "CONFIRMED_SIMULATED": "COMPLETED",
+                "COMPLETED_SIMULATED": "COMPLETED",
+                "FAILED": "FAILED",
+                "DECLINED": "CANCELLED",
+                "CANCELLED_SIMULATED": "CANCELLED",
+            }.get(item["booking_status"], "AWAITING_EXTERNAL_APPROVAL")
     if perms is None:
         view["transcript"] = (
             []
