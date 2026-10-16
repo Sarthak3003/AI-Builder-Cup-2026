@@ -21,7 +21,7 @@ from app.domain import (
     ServiceType,
     rupees,
 )
-from app.onboarding import connected, default_pickup
+from app.onboarding import OWN_OPTIONS, connected, default_pickup, own_option_enabled
 from app.providers import (
     APP_NAMES,
     MAX_LINES,
@@ -200,6 +200,8 @@ def create_quotes(
     provider = provider_for(service_type, state["provider_ledger"])
     if not connected(state, service_type):
         raise HTTPException(409, f"Connect the {provider.label} first, in Services.")
+    if body.option_id == OWN_OPTIONS[service_type] and not own_option_enabled(state, service_type):
+        raise HTTPException(409, f"{provider.label} is switched off in Services.")
     appointment_id = None
     if service_type == "RIDE":
         pickup, destination, appointment_id = _ride_places(state, body)
@@ -210,6 +212,8 @@ def create_quotes(
             options = [body.option_id]
         else:
             options = ride_option_ids(enabled_apps)
+            if not own_option_enabled(state, service_type):
+                options = [option for option in options if option != OWN_OPTIONS[service_type]]
         requests = [
             QuoteRequest(
                 service_type="RIDE", option_id=option, pickup=pickup, destination=destination
@@ -409,6 +413,10 @@ def confirm_quote(
         raise HTTPException(409, f"Connect the {quote['provider_label']} first, in Services.")
     if quote["app_id"] and quote["app_id"] not in enabled_apps:
         raise HTTPException(409, f"{quote['app_name']} is switched off in Services.")
+    if quote["option_id"] == OWN_OPTIONS[quote["service_type"]] and not own_option_enabled(
+        state, quote["service_type"]
+    ):
+        raise HTTPException(409, f"{quote['provider_label']} is switched off in Services.")
 
     reason = approval_reason(state, quote["service_type"], quote["amount_minor"])
     booking = {

@@ -140,14 +140,14 @@ test('the Care Circle step says exactly what is shared and adds a view-only pers
 
 test('demo services are labelled simulated and connect only with an explicit tap', async () => {
   const connected = fresh({ onboarding: progress(4), services: demoServices('SETUP_REQUIRED').map((s) => (s.service_type === 'RIDE' ? demoServices()[0] : s)) })
-  const calls = stubApi({ 'POST /services/RIDE/connect-demo': () => connected }, fresh({ onboarding: progress(4) }))
+  const calls = stubApi({ 'POST /services/RIDE/options': () => connected }, fresh({ onboarding: progress(4) }))
   window.location.hash = '#/onboarding/services'
   render(<App />)
-  expect(await screen.findAllByText('Simulated provider — no real order or dispatch.')).toHaveLength(3)
-  expect(screen.getAllByText('Setup required')).toHaveLength(3)
-  await userEvent.click(screen.getByRole('button', { name: 'Connect Demo Ride Provider' }))
-  expect(await screen.findByRole('button', { name: 'Disconnect Demo Ride Provider' })).toBeInTheDocument()
-  expect(sent(calls, 'POST', '/services/RIDE/connect-demo')).toEqual([{ consent: true }])
+  expect(await screen.findByText('All options are simulated. No real bookings, deliveries or payments.')).toBeInTheDocument()
+  expect(screen.getByRole('switch', { name: 'Use Demo Ride Provider' })).not.toBeChecked()
+  await userEvent.click(screen.getByRole('switch', { name: 'Use Demo Ride Provider' }))
+  expect(await screen.findByRole('switch', { name: 'Use Demo Ride Provider' })).toBeChecked()
+  expect(sent(calls, 'POST', '/services/RIDE/options')).toEqual([{ option_id: 'demo-ride', enabled: true, consent: true }])
 })
 
 test('the payment step offers only simulated methods and never asks for card or bank details', async () => {

@@ -30,6 +30,7 @@ export type DemoService = {
   service_type: ServiceType; provider_type: string; provider_label: string; connection_mode: 'SIMULATED'; status: ConnectionStatus;
   granted_capabilities: string[]; consent_at: number | null; updated_at: number | null; description: string; notice: string;
   capabilities: { id: string; label: string }[]; catalogue: Catalogue;
+  own_option_enabled?: boolean;
 }
 export type Sharing = { ride: boolean; food: boolean; medicine: boolean; appointments: boolean }
 export type Service = 'food' | 'ride' | 'medicine'

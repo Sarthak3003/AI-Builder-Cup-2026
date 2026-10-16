@@ -410,20 +410,16 @@ test('meals too: Order now places the order at once, and asking Saathi orders it
 })
 
 test('turning an option off saves the choice, and the page is honest that these are demos', async () => {
-  const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: { ...makeState().profile, ...(body as object) } }) })
+  const calls = stubApi({ 'POST /services/RIDE/options': () => makeState({ profile: { ...makeState().profile, enabled_providers: ['ola', 'rapido', 'ubereats', 'swiggy', 'zomato'] } }) })
   window.location.hash = '#/apps'
   render(<App />)
-  expect(await screen.findByText(/not\s+connected to those companies/)).toBeInTheDocument()
-  expect(screen.getAllByText('Simulated provider — no real order or dispatch.')).toHaveLength(3)
-  const uber = await screen.findByRole('switch', { name: 'Show Uber example option' })
+  expect(await screen.findByText('All options are simulated. No real bookings, deliveries or payments.')).toBeInTheDocument()
+  const uber = await screen.findByRole('switch', { name: 'Use Uber' })
   expect(uber).toBeChecked()
   await userEvent.click(uber)
-  const save = calls.find((call) => call.method === 'PUT' && call.url.endsWith('/profile'))
-  expect(save, 'the profile was never saved').toBeDefined()
-  const sent = (save!.body as { enabled_providers: string[] }).enabled_providers
-  expect(sent).not.toContain('uber')
-  expect(sent).toEqual(['ola', 'rapido', 'ubereats', 'swiggy', 'zomato'])
-  await waitFor(() => expect(screen.getByRole('switch', { name: 'Show Uber example option' })).not.toBeChecked())
+  const save = calls.find((call) => call.url.endsWith('/services/RIDE/options'))
+  expect(save?.body).toEqual({ option_id: 'uber', enabled: false, consent: true })
+  await waitFor(() => expect(screen.getByRole('switch', { name: 'Use Uber' })).not.toBeChecked())
 })
 
 test('a caretaker gets the Care Circle dashboard, never the request screens', async () => {

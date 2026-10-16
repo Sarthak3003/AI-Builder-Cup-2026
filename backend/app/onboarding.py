@@ -20,7 +20,7 @@ from app.domain import (
     PaymentMethod,
     ServiceType,
 )
-from app.providers import DEMO_PROVIDERS, service_catalogue
+from app.providers import APPS, DEMO_PROVIDERS, enabled_apps, service_catalogue
 
 MAX_PLACES = 8
 STEP_TITLES = {
@@ -50,6 +50,7 @@ DESCRIPTIONS = {
     "medical advice.",
 }
 SIMULATED_NOTICE = "Simulated provider — no real order or dispatch."
+OWN_OPTIONS = {"RIDE": "demo-ride", "FOOD": "demo-kitchen", "PHARMACY": "demo-pharmacy"}
 
 
 def connection_record(service_type: ServiceType) -> dict:
@@ -147,6 +148,11 @@ class FinishIn(BaseModel):
 class ConsentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     consent: Literal[True]
+
+
+class ServiceOptionIn(ConsentIn):
+    option_id: str = Field(min_length=1, max_length=40)
+    enabled: bool = Field(strict=True)
 
 
 class GrantIn(BaseModel):
@@ -293,6 +299,10 @@ def onboarding_view(state: dict) -> dict:
 
 def services_view(state: dict, enabled_apps: list[str]) -> list[dict]:
     catalogue = service_catalogue(enabled_apps)
+    for service_type, key in [("RIDE", "options"), ("FOOD", "kitchens")]:
+        for option in catalogue[service_type][key]:
+            if option["id"] == OWN_OPTIONS[service_type]:
+                option["enabled"] = own_option_enabled(state, service_type)
     return [
         {
             **state["connections"][service_type],
@@ -379,8 +389,41 @@ def connected(state: dict, service_type: str) -> bool:
     return state["connections"][service_type]["status"] == "CONNECTED"
 
 
+def own_option_enabled(state: dict, service_type: str) -> bool:
+    return state["connections"][service_type].get("own_option_enabled", True)
+
+
+def select_service_option(state: dict, service_type: ServiceType, body: ServiceOptionIn) -> None:
+    app_ids = {app.id for app in APPS if app.service_type == service_type}
+    own_id = OWN_OPTIONS[service_type]
+    if body.option_id not in app_ids | {own_id}:
+        raise HTTPException(422, "Choose a listed service option.")
+    connection = state["connections"][service_type]
+    selected = enabled_apps(state["profile"])
+    # A disconnected category starts with only the option explicitly switched on.
+    if not connected(state, service_type):
+        selected = [app for app in selected if app not in app_ids]
+        connection["own_option_enabled"] = False
+    if body.option_id == own_id:
+        connection["own_option_enabled"] = body.enabled
+    elif body.enabled and body.option_id not in selected:
+        selected.append(body.option_id)
+    elif not body.enabled:
+        selected = [app for app in selected if app != body.option_id]
+    state["profile"]["enabled_providers"] = selected
+    if own_option_enabled(state, service_type) or app_ids.intersection(selected):
+        connect(state, service_type)
+    else:
+        disconnect(state, service_type)
+
+
 def connect(state: dict, service_type: ServiceType, now: float | None = None) -> dict:
     record = state["connections"][service_type]
+    app_ids = {app.id for app in APPS if app.service_type == service_type}
+    if not own_option_enabled(state, service_type) and not app_ids.intersection(
+        enabled_apps(state["profile"])
+    ):
+        record["own_option_enabled"] = True
     if record["status"] != "CONNECTED":
         now = time.time() if now is None else now
         record.update(

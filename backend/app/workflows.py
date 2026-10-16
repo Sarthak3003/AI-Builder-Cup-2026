@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.bookings import QuoteIn, create_quotes, lets_saathi_book, offer_order, pick_offer
 from app.care import add_event
 from app.intent import EMERGENCY
+from app.onboarding import OWN_OPTIONS, own_option_enabled
 from app.providers import MAX_LINES, ItemRequest, enabled_apps, match_products, suggest_meals
 
 PHARMACY_ONLY = (
@@ -139,6 +140,8 @@ def quote_for_draft(state, draft, message, channel, appointment):
         mild = profile["mild"] if draft.mild is None else draft.mild
         budget = profile["budget"] if draft.budget is None else draft.budget
         picks = suggest_meals(enabled_apps(state["profile"]), vegetarian, mild, budget * 100)
+        if not own_option_enabled(state, "FOOD"):
+            picks = [pick for pick in picks if pick[0] != OWN_OPTIONS["FOOD"]]
         if not picks:
             raise HTTPException(
                 409, f"No demo meals fit within ₹{budget}. Try a larger budget or the menus."

@@ -64,6 +64,7 @@ from app.onboarding import (
     GrantIn,
     PlaceIn,
     ProfilePatch,
+    ServiceOptionIn,
     StepIn,
     connect,
     delete_place,
@@ -75,6 +76,7 @@ from app.onboarding import (
     reset_connection,
     review,
     save_place,
+    select_service_option,
     services_view,
     set_home_address,
     sync_home,
@@ -568,6 +570,15 @@ def hub_router(config: Settings):
         def save(state):
             connect(state, service_type)
             record(state, "service_connected", service_type)
+            return public(state, who)
+
+        return mutate(who, save, owner_only=True)
+
+    @router.post("/services/{service_type}/options")
+    def service_option(service_type: ServiceType, body: ServiceOptionIn, who=actor):
+        def save(state):
+            select_service_option(state, service_type, body)
+            record(state, "service_option_changed", body.option_id)
             return public(state, who)
 
         return mutate(who, save, owner_only=True)

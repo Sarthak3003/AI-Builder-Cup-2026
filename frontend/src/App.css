@@ -230,21 +230,19 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .app-list { display: flex; flex-direction: column; gap: 8px; }
 .app-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .app-info { display: flex; flex-direction: column; gap: 2px; }
-.service-connection h3 { font-size: 1.1875em; }
-.service-connection.connected { border: 2px solid var(--green-tint); }
 .service-options { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .service-options + .service-options { margin-top: 12px; }
 .service-options > h2 { font-size: 1.125em; }
-.service-connection .end-to-end { background: var(--blue-tint); color: var(--blue-ink); }
-.example-options, .example-provider-list { display: flex; flex-direction: column; gap: 10px; }
-.example-options > p { font-size: 0.9375em; }
-.example-provider-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.example-provider-info { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
-.example-provider-info .provider { min-width: 0; }
-.example-provider-info .provider-dot { flex: none; }
-.example-provider-info .provider-name { overflow-wrap: anywhere; }
-.example-provider-info .chip { font-size: 0.6875em; }
-.example-provider-option .switch { flex-shrink: 0; }
+.service-option-list { display: flex; flex-direction: column; gap: 10px; }
+.service-disclaimer { font-size: 0.875em; }
+.service-option-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.service-option-row.selected { border-color: var(--blue-strong); background: var(--blue-tint); }
+.service-option-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.service-option-info .provider { min-width: 0; }
+.service-option-info .provider-dot { flex: none; }
+.service-option-info .provider-name { overflow-wrap: anywhere; }
+.service-option-note { font-size: 0.75em; padding-left: 36px; }
+.service-option-row .switch { flex-shrink: 0; }
 
 /* ---------- Setup wizard ---------- */
 .setup-card { border: 2px solid var(--blue); }

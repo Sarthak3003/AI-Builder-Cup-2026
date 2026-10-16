@@ -188,9 +188,10 @@ function ServicesStep({ hub, nav }: StepProps) {
   const services = hub.state.services ?? []
   return (
     <>
-      <p className="lead">Connect a demo provider for the complete flow. Uber, Ola and other familiar names are example options only. No real order, dispatch or payment takes place.</p>
+      <p className="lead">Choose the services Saathi can use for you.</p>
+      <p className="muted service-disclaimer">All options are simulated. No real bookings, deliveries or payments.</p>
       {services.map((service) => <ServiceOptions key={service.service_type} hub={hub} service={service} />)}
-      <p className="muted">You can skip this and connect them later in Services.</p>
+      <p className="muted">You can change these choices later in Services.</p>
       <Actions hub={hub} nav={nav} step="services" onContinue={save} exitSave={save} skippable={!services.some((s) => s.status === 'CONNECTED')} />
     </>
   )
