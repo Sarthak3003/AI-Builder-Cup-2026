@@ -117,7 +117,7 @@ test('activity details show the reference, timeline, sharing switch and separate
   const calls = stubApi({
     'PUT /bookings/*/sharing': () => ({ ...booked, shared: false }),
     'POST /bookings/*/complete': () => booking(rideQuote(), 'COMPLETED_SIMULATED'),
-    'POST /bookings/*/payment/complete': () => booked,
+    'POST /bookings/*/payment/complete': () => ({ ...booked, payment: { ...booked.payment!, status: 'SUCCEEDED_SIMULATED' } }),
   }, makeState({ demo_controls: true, activity: [booked], events: [event({ ref: booked.id, title: 'Booked (simulated): Uber Go to Doctor' })], conversations: [summary()] }))
   window.location.hash = `#/activity/${booked.id}`
   render(<App />)
@@ -137,6 +137,8 @@ test('activity details show the reference, timeline, sharing switch and separate
   expect(calls.find((call) => call.url.endsWith('/sharing'))?.body).toEqual({ shared: false })
   await userEvent.click(screen.getByRole('button', { name: 'Demo: mark simulated payment complete' }))
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/payment/complete`))).toBe(true)
+  expect(await screen.findByRole('dialog', { name: 'Payment successful' })).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Back to booking' }))
   await userEvent.click(screen.getByRole('button', { name: 'Demo: mark trip or delivery completed' }))
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/complete`))).toBe(true)
 })

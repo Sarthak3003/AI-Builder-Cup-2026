@@ -153,7 +153,7 @@ export default function App() {
     switch (route.page) {
       case 'request': return <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} simple={simple} />
       case 'activity': return <ActivityScreen hub={current} simple={simple} />
-      case 'detail': return <DetailScreen hub={current} id={route.id} />
+      case 'detail': return <DetailScreen key={route.id} hub={current} id={route.id} />
       case 'services': return <ServicesScreen hub={current} />
       case 'onboarding': return <OnboardingWizard hub={current} step={route.step} />
       case 'family': return <CareScreen hub={current} />
