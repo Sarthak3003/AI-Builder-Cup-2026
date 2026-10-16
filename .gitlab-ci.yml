@@ -21,9 +21,12 @@ backend:
     - pip install --no-deps -e .
     - ruff check .
     - ruff format --check .
-    - pytest -q
+    - pytest -q --junitxml=reports/backend.xml
     - python -m build
   artifacts:
+    when: always
+    reports:
+      junit: backend/reports/backend.xml
     paths: [backend/dist/]
 
 backend-container:

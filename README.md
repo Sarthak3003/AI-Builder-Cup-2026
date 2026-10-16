@@ -234,7 +234,7 @@ Not implemented, or different from the plan:
 - **Live updates** use polling (8 seconds and on tab focus), not Firestore listeners. The deployed Firestore rules deny direct client access, and there is no client sign-in to authorise listeners.
 - **Identity**: Firebase sign-in was removed on `develop`. Owners and caretakers are anonymous, signed demo sessions that last up to 24 hours per browser. Invitations are one-use and expire after 24 hours.
 - **Notifications** appear in the app only; no SMS, email or push.
-- **Phone calls and WhatsApp** are not connected. The "message" channel is an in-app preview, and seeded conversations are labelled as samples.
+- **Phone calls:** Twilio endpoints, pairing and shared conversations are implemented and tested with signed local webhooks; live calling awaits your credentials, approved number and smoke test. **WhatsApp/SMS** remain unconnected; message mode is an in-app preview.
 - **Scam detection** is word matching, labelled as a suspicion; there is no AI classifier.
 - **Multiple caretakers**: there are no primary or backup contacts and no appointment responsibilities. Editing an appointment exists in the API (`PUT /api/hub/appointments/{id}`), but the UI only adds and removes.
 - **Gemini summaries** have not been tried with a real key; tests fake the Gemini responses.
@@ -242,6 +242,18 @@ Not implemented, or different from the plan:
 - **Prescription medicines** are not represented; the demo pharmacy has sample non-prescription items only.
 - **Places** are typed text with sample addresses; there are no maps, geocoding or live distances. Ride distances are worked out from the place names so that prices stay the same every time.
 - **End-to-end script**: `scripts/e2e-local.cjs` could not be run on this laptop, because its managed browsers block automation. The same steps (both parts) were run with Playwright in the editor's built-in browser, and `test_scripted_demo.py` covers part 1 through the API. Layout was checked at 320 and 390 px wide, and the reset confirmation was checked with the keyboard.
+
+## Telephone assistant (Twilio)
+
+The existing backend accepts **signed Twilio Voice webhooks**. There is no simulator UI or endpoint. Supply credentials and an approved Voice-capable number separately; **a real inbound call has not been tested**.
+
+- Profile → **Call Saathi** generates a private, eight-digit, five-minute, single-use code when calling is enabled. Enter it on the telephone keypad, then `#`. Caller ID alone never identifies the account.
+- Calls reuse Gemini drafting, service workflows, approvals and activity. Phone rides/food always require explicit confirmation, regardless of the app's automatic-booking preference. Medicine ordering is excluded.
+- Activity displays phone source, duration, result and an opt-in redacted transcript, refreshed by three-second read-only polling on relevant screens.
+- Public POST routes: `/api/phone/twilio/incoming`, `/api/phone/twilio/gather`, `/api/phone/twilio/status`, `/api/phone/twilio/fallback`. All require a valid provider signature and configured AccountSid.
+- Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `SAATHI_PHONE_PUBLIC_BASE_URL`, `SAATHI_PHONE_ENABLED` and optionally `SAATHI_PHONE_NUMBER`. Start with [the environment example](backend/.env.example); no real credentials are committed.
+
+Guides: [Twilio setup](docs/phone-assistant/telephony-setup.md), [architecture](docs/phone-assistant/architecture.md), [state machine](docs/phone-assistant/conversation-state-machine.md), [pairing/security](docs/phone-assistant/pairing-and-security.md), [testing](docs/phone-assistant/testing.md), [deployment/costs](docs/phone-assistant/deployment.md), [troubleshooting](docs/phone-assistant/troubleshooting.md).
 
 ## Checks
 

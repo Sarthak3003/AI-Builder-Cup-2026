@@ -45,7 +45,7 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
 
       <section className="card">
         <h2>What is still an integration</h2>
-        <p>Phone calls, WhatsApp and SMS are not connected. Message mode is an in-app preview. No sign-in is required: each browser gets a separate demo session.</p>
+        <p>Twilio telephone-call endpoints are implemented but a live call has not yet been verified. Calling needs server credentials and an approved number; pair from Profile when enabled. WhatsApp and SMS are not connected. Message mode is an in-app preview. Each browser gets a separate demo session.</p>
         <p>Understanding requests: <strong>{state.gemini ? 'Gemini. Microphone recordings are sent to Google to be understood.' : 'simple word matching on this server (not AI). Speech is turned into text by your browser.'}</strong></p>
         <p>Storage: <strong>{state.storage}</strong>. Default local storage persists on this computer. Firestore emulator mode is available.</p>
         <details>

@@ -15,6 +15,7 @@ build/
 tmp/
 coverage/
 test-results/
+backend/reports/
 playwright-report/
 service-account*.json
 *-credentials.json
