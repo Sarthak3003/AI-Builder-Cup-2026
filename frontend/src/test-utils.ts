@@ -140,6 +140,7 @@ export function booking(quote: Quote, status: BookingStatus = 'CONFIRMED_SIMULAT
     provider_booking_id: made ? `${quote.service_type === 'RIDE' ? 'DEMO-RIDE' : 'DEMO-FOOD'}-1042` : null,
     payment: { method: quote.payment_method, status: paid, amount_minor: quote.amount_minor, currency: 'INR', simulated: true, refund: null },
     shared: true, approval_reason: '', appointment_id: quote.appointment_id, decision: null, questions: [], failure: '',
+    trip: made && quote.service_type === 'RIDE' ? { vehicle: 'Hatchback', plate: 'DEMO 1042', pin: '2957' } : null,
     created_at: nowSeconds() - 60, ...overrides,
   }
 }

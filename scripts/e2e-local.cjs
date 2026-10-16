@@ -77,7 +77,12 @@ async function rideToDoctor(page) {
   await meera.getByText('Demo details').click();
   await meera.getByText('CONFIRMED_SIMULATED').waitFor();
   await meera.getByText('SUCCEEDED_SIMULATED').waitFor();
-  const detail = await meera.getByRole('link', { name: 'See booking details' }).getAttribute('href');
+  const detail = await meera.getByRole('link', { name: 'Track your demo ride' }).getAttribute('href');
+  await meera.goto(`${BASE}/${detail}`);
+  await meera.getByRole('heading', { name: 'Demo driver on the way' }).waitFor();
+  await meera.getByText('Demo map · not live').waitFor();
+  await meera.getByText('Ride PIN (demo)').waitFor();
+  await meera.getByText('Not a real person · Car (sample)').waitFor();
 
   // 4. The same event in Meera's timeline and in Ravi's Care Circle view, without addresses or payment.
   await tab(meera, 'Activity').click();
@@ -93,7 +98,7 @@ async function rideToDoctor(page) {
   await ravi.goto(`${BASE}/${detail}`);
   await ravi.getByRole('heading', { name: 'Demo Ride to Doctor' }).waitFor();
   const seen = await ravi.locator('main').innerText();
-  assert(!/Sample Lane|Example Road|Paid \(simulated\)/.test(seen), 'Ravi sees an address or payment he was not given');
+  assert(!/Sample Lane|Example Road|Paid \(simulated\)|Ride PIN/.test(seen), 'Ravi sees an address, payment or ride PIN he was not given');
 
   // 5. Ravi tries what view-only access does not allow; the server refuses.
   await ravi.getByRole('button', { name: 'Try to cancel this booking' }).click();

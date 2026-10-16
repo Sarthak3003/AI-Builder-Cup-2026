@@ -308,7 +308,7 @@ function Receipt({ hub, receipt, simple, onAgain }: { hub: Hub; receipt: Activit
       {simple ? <a className="primary wide" href="#/">Done</a> : (
         <>
           <p className="reassure">{waiting ? 'No need to call anyone.' : 'That is it. There was no need to call anyone.'}</p>
-          <a className="primary wide" href={`#/activity/${receipt.id}`}>See booking details</a>
+          <a className="primary wide" href={`#/activity/${receipt.id}`}>{receipt.service === 'ride' && !waiting ? 'Track your demo ride' : 'See booking details'}</a>
           <button type="button" className="secondary wide" onClick={onAgain}>Book something else</button>
         </>
       )}

@@ -25,6 +25,9 @@
   --line: #dadce0;
   --control-line: #80868b;
   --on-dark: #ffffff;
+  /* Decorative fills for the drawn demo map only; never behind text. */
+  --map-land: #edf2e8;
+  --map-park: #d9e8d1;
 
   --radius: 14px;
   --radius-lg: 24px;

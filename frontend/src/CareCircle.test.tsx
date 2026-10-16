@@ -122,7 +122,7 @@ test('activity details show the reference, timeline, sharing switch and separate
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
   expect(screen.getByText('DEMO-RIDE-1042 (simulated)')).toBeInTheDocument()
-  expect(screen.getByText('Home, 12 Sample Lane, Demo Nagar (sample address)')).toBeInTheDocument()
+  expect(screen.getByText('12 Sample Lane, Demo Nagar (sample address)')).toBeInTheDocument()
   expect(screen.getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
   expect(screen.getByText('CONFIRMED_SIMULATED')).toBeInTheDocument()
   expect(screen.getByText('PENDING_SIMULATED')).toBeInTheDocument()
@@ -135,6 +135,46 @@ test('activity details show the reference, timeline, sharing switch and separate
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/payment/complete`))).toBe(true)
   await userEvent.click(screen.getByRole('button', { name: 'Demo: mark trip or delivery completed' }))
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/complete`))).toBe(true)
+})
+
+test('a booked ride reads like a ride app, and every part says it is a demo', async () => {
+  const booked = booking(rideQuote())
+  const calls = stubApi({ 'POST /help': () => event({ kind: 'help_requested' }) }, makeState({ activity: [booked] }))
+  window.location.hash = `#/activity/${booked.id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Demo driver on the way' })).toBeInTheDocument()
+  expect(screen.getByText('Pickup from Home in about 6 min (estimate). Simulated: no real driver will arrive.')).toBeInTheDocument()
+  expect(screen.getByText('Demo map · not live')).toBeInTheDocument()
+  expect(screen.getByText('Ride PIN (demo)')).toBeInTheDocument()
+  expect(screen.getByText('2 9 5 7')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Demo driver' })).toBeInTheDocument()
+  expect(screen.getByText('Not a real person · Hatchback (sample)')).toBeInTheDocument()
+  expect(screen.getByText('DEMO 1042')).toBeInTheDocument()
+  expect(screen.getByText('5.3 km · about 21 min')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Call the demo driver' }))
+  expect(screen.getByText('Demo only: there is no driver to call.')).toHaveAttribute('role', 'status')
+  await userEvent.click(screen.getByRole('button', { name: 'Help' }))
+  expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'help', note: 'Help with Uber Go to Doctor' })
+  expect(screen.getByRole('button', { name: 'Cancel ride' })).toBeInTheDocument()
+})
+
+test('the ride page shows no PIN or driver once a ride is over or before it is booked', async () => {
+  const done = booking(rideQuote(), 'COMPLETED_SIMULATED')
+  const waiting = booking(rideQuote(), 'AWAITING_APPROVAL', { approval_reason: 'Above the ₹100 approval limit.' })
+  stubApi({}, makeState({ activity: [done, waiting] }))
+  window.location.hash = `#/activity/${done.id}`
+  const { unmount } = render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Arrived at Doctor' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Demo driver' })).toBeInTheDocument()
+  expect(screen.queryByText('Ride PIN (demo)')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Call the demo driver' })).not.toBeInTheDocument()
+  unmount()
+  window.location.hash = `#/activity/${waiting.id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Waiting for approval' })).toBeInTheDocument()
+  expect(screen.getByText('Above the ₹100 approval limit. Nothing is booked until an approver agrees.')).toBeInTheDocument()
+  expect(screen.queryByText('Ride PIN (demo)')).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Demo driver' })).not.toBeInTheDocument()
 })
 
 test('upcoming plans flag missed reminders without claiming a medicine was taken', async () => {
@@ -223,7 +263,7 @@ test('in a loaded demo the profile switches between Meera and her caretakers by 
 // What the server sends a view-only caretaker: labels instead of addresses, and no payment.
 function shared() {
   const full = ride()
-  return { ...full, payment: undefined, details: { pickup: { label: 'Home' }, destination: { label: 'Doctor' }, distance_km: 5.3 } }
+  return { ...full, payment: undefined, trip: undefined, details: { pickup: { label: 'Home' }, destination: { label: 'Doctor' }, distance_km: 5.3 } }
 }
 
 test('the owner and a caretaker see the same ride event; the caretaker without addresses or payment', async () => {
@@ -240,6 +280,9 @@ test('the owner and a caretaker see the same ride event; the caretaker without a
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Uber Go to Doctor' })).toBeInTheDocument()
   expect(screen.getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Demo driver on the way' })).toBeInTheDocument()
+  expect(screen.queryByText('Ride PIN (demo)')).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Demo driver' })).not.toBeInTheDocument()
   expect(screen.getByText('Home')).toBeInTheDocument()
   expect(screen.queryByText(/Sample Lane/)).not.toBeInTheDocument()
   expect(screen.queryByText(/Payment:/)).not.toBeInTheDocument()

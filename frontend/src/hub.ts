@@ -56,10 +56,12 @@ export type AskResult = {
 }
 export type Payment = { method: PaymentMethod; status: PaymentStatus; amount_minor: number; currency: string; simulated: boolean; updated_at?: number; refund?: { status: string; at: number } | null }
 export type Decision = { action: 'approve' | 'reject'; by: string; name: string; note: string; at: number }
+// Sample details the Demo Ride Provider assigns to a booked ride. Never sent to caretakers.
+export type Trip = { vehicle: string; plate: string; pin: string }
 export type Activity = Offer & {
   id: string; request_id?: string; quote_id?: string; channel: string; booking_status: BookingStatus; provider_booking_id: string | null;
   payment?: Payment; shared?: boolean; approval_reason?: string; appointment_id?: string | null; decision?: Decision | null;
-  questions?: { by: string; text: string; at: number }[]; failure?: string; created_at: number; updated_at?: number;
+  questions?: { by: string; text: string; at: number }[]; failure?: string; trip?: Trip | null; created_at: number; updated_at?: number;
 }
 export type Role = 'viewer' | 'assistant' | 'approver' | 'administrator'
 export type Grant = {

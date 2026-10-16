@@ -367,6 +367,45 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .transcript { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius); background: var(--surface-2); }
 .overview.attention { border: 2px solid var(--blue-tint); }
 
+/* ---------- Ride page: laid out like a familiar ride app, every part marked as a demo ---------- */
+.ride-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ride-header .muted { margin-top: 4px; }
+.ride-header .secondary { flex: none; }
+.ride-card { padding: 0; gap: 0; overflow: hidden; }
+.route-map { position: relative; height: 160px; background: var(--map-land); }
+.route-map > svg { display: block; width: 100%; height: 100%; }
+.route-map .land { fill: var(--map-land); }
+.route-map .park { fill: var(--map-park); }
+.route-map .street { fill: none; stroke: var(--surface); stroke-width: 12; }
+.route-map .route { fill: none; stroke: var(--blue); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.route-map.idle .route { stroke: var(--control-line); stroke-dasharray: 2 10; }
+.route-map .pin-start { fill: var(--green-strong); stroke: var(--surface); stroke-width: 3; }
+.route-map .pin-end { fill: var(--red-strong); stroke: var(--surface); stroke-width: 3; }
+.route-map .map-car circle { fill: var(--surface); stroke: var(--blue-strong); stroke-width: 2; }
+.route-map .map-car svg { fill: none; stroke: var(--blue-strong); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.map-chip { position: absolute; top: 12px; left: 12px; }
+.ride-status { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px 20px; }
+.ride-status h2 { font-size: 1.375em; line-height: 1.25; text-wrap: balance; }
+.pin-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px 12px; padding: 16px 20px; border-top: 1px solid var(--line); }
+.pin-note { grid-column: 1 / -1; font-size: 0.875em; }
+.pin { display: inline-flex; flex: none; gap: 6px; }
+.pin-digit { display: grid; place-items: center; width: 34px; height: 42px; border-radius: 8px; background: var(--text); color: var(--on-dark); font-size: 1.25em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.driver-row { display: flex; align-items: center; gap: 14px; }
+.driver-avatar { display: grid; place-items: center; flex: none; width: 56px; height: 56px; border-radius: 50%; background: var(--blue-tint); color: var(--blue-ink); }
+.driver-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.driver-text h2 { font-size: 1.0625em; }
+.plate { align-self: flex-start; margin-top: 4px; padding: 2px 8px; border: 2px solid var(--text); border-radius: 6px; font-weight: 700; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+.call-button { flex: none; width: 52px; padding: 0; }
+.stops { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.stop { position: relative; display: grid; grid-template-columns: 20px 1fr; gap: 12px; align-items: start; }
+.stop:not(:last-child)::after { content: ''; position: absolute; top: 24px; bottom: -18px; left: 9px; border-left: 2px dotted var(--control-line); }
+.stop div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stop-mark { width: 14px; height: 14px; margin: 4px auto 0; }
+.stop-mark.start { border-radius: 50%; background: var(--green-strong); }
+.stop-mark.end { border-radius: 3px; background: var(--red-strong); }
+.fare-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.fare-total { font-size: 1.75em; font-weight: 700; }
+
 /* ---------- Footer and bottom navigation ---------- */
 .footnote {
   display: flex; flex-direction: column; gap: 8px; align-items: flex-start;

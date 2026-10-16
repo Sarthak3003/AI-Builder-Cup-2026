@@ -147,13 +147,15 @@ def test_bookings_get_stable_demo_references_once_per_idempotency_key():
     provider = provider_for("RIDE", ledger)
     first = booking(provider)
     assert (first.provider_booking_id, first.status) == ("DEMO-RIDE-1042", "CONFIRMED")
+    # ride() books an Uber Go, so the sample vehicle is a hatchback; the PIN follows the reference.
+    assert first.trip.model_dump() == {"vehicle": "Hatchback", "plate": "DEMO 1042", "pin": "2957"}
     assert booking(provider) == first
     assert booking(provider_for("RIDE", ledger), "key-00000002").provider_booking_id == (
         "DEMO-RIDE-1043"
     )
     food_provider = provider_for("FOOD", ledger)
     meal = booking(food_provider, quote=food_provider.get_quote(food()))
-    assert meal.provider_booking_id == "DEMO-FOOD-1042"
+    assert meal.provider_booking_id == "DEMO-FOOD-1042" and meal.trip is None
     assert provider.get_booking("DEMO-RIDE-1042") == first
 
 

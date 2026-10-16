@@ -87,11 +87,20 @@ class CreateBookingRequest(BaseModel):
     simulate_failure: bool = False
 
 
+class Trip(BaseModel):
+    """Sample assignment details for a demo ride. No real driver or vehicle exists."""
+
+    vehicle: str
+    plate: str
+    pin: str
+
+
 class BookingResult(BaseModel):
     provider_type: ProviderType
     provider_booking_id: str
     status: Literal["CONFIRMED", "CANCELLED", "COMPLETED"]
     message: str
+    trip: Trip | None = None
     simulated: Literal[True] = True
 
 
@@ -164,6 +173,7 @@ class RideOption(NamedTuple):
     base_minor: int
     per_km_minor: int
     pickup_min: int
+    vehicle: str
 
 
 class MenuItem(NamedTuple):
@@ -192,10 +202,10 @@ class Product(NamedTuple):
 
 # Fixed sample pricing so every demo run shows the same fares.
 RIDE_OPTIONS = (
-    RideOption("demo-ride", "Demo Ride", None, 3000, 1200, 4),
-    RideOption("rapido-auto", "Rapido Auto", "rapido", 2500, 1100, 3),
-    RideOption("ola-mini", "Ola Mini", "ola", 4500, 1500, 5),
-    RideOption("uber-go", "Uber Go", "uber", 5000, 1600, 6),
+    RideOption("demo-ride", "Demo Ride", None, 3000, 1200, 4, "Car"),
+    RideOption("rapido-auto", "Rapido Auto", "rapido", 2500, 1100, 3, "Auto rickshaw"),
+    RideOption("ola-mini", "Ola Mini", "ola", 4500, 1500, 5, "Hatchback"),
+    RideOption("uber-go", "Uber Go", "uber", 5000, 1600, 6, "Hatchback"),
 )
 FOOD_DELIVERY_FEE = 2500
 KITCHENS = (
@@ -330,9 +340,13 @@ class _DemoProvider:
             "status": "CONFIRMED",
             "amount_minor": quote.amount_minor,
             "option_id": quote.option_id,
+            "trip": self._trip(number, quote),
         }
         self.records["keys"][request.idempotency_key] = reference
         return self._result(reference)
+
+    def _trip(self, number: int, quote: ProviderQuote) -> dict | None:
+        return None
 
     def get_booking(self, provider_booking_id: str) -> BookingResult:
         return self._result(provider_booking_id)
@@ -359,13 +373,15 @@ class _DemoProvider:
         return record
 
     def _result(self, provider_booking_id: str) -> BookingResult:
-        status = self._record(provider_booking_id)["status"]
+        record = self._record(provider_booking_id)
+        status = record["status"]
         words = {"CONFIRMED": "accepted", "CANCELLED": "cancelled", "COMPLETED": "completed"}
         return BookingResult(
             provider_type=self.provider_type,
             provider_booking_id=provider_booking_id,
             status=status,
             message=f"{self.label} {words[status]} this booking (simulated).",
+            trip=record.get("trip"),
         )
 
     def _items(self, request: QuoteRequest, lookup) -> list[tuple[object, int]]:
@@ -390,6 +406,12 @@ class DemoRideProvider(_DemoProvider):
     prefix = "DEMO-RIDE"
     capabilities = ("quote_rides", "book_rides", "cancel_rides")
     notice = "Demo ride — no real driver will arrive."
+
+    def _trip(self, number: int, quote: ProviderQuote) -> dict:
+        option = next(o for o in RIDE_OPTIONS if o.id == quote.option_id)
+        digest = sha256(f"{self.prefix}-{number}".encode()).hexdigest()
+        pin = f"{int(digest[:8], 16) % 10000:04d}"
+        return {"vehicle": option.vehicle, "plate": f"DEMO {number}", "pin": pin}
 
     def _quote(self, request: QuoteRequest) -> ProviderQuote:
         option = next((o for o in RIDE_OPTIONS if o.id == request.option_id), None)

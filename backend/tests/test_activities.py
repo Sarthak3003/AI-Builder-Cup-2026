@@ -55,7 +55,7 @@ def test_the_owner_and_a_caretaker_see_the_same_persisted_ride_event(app, owner)
         "destination": {"label": "Doctor"},
         "distance_km": 5.3,
     }
-    for private in ("payment", "idempotency_key", "quote_id"):
+    for private in ("payment", "idempotency_key", "quote_id", "trip"):
         assert private not in shared
     assert "Sample Lane" not in str(seen) and "Example Road" not in str(seen)
 

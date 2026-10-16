@@ -1,21 +1,17 @@
 import type { ReactNode } from 'react'
 import { formatINR, formatWhen, paymentMethodLabel } from '../hub'
-import type { Activity, Appointment, CareEvent, Conversation, PlaceSnapshot } from '../hub'
+import type { Activity, Appointment, CareEvent, Conversation } from '../hub'
 import PriceLines from './PriceLines'
 import ProviderBadge from './ProviderBadge'
+import RideTrip from './RideTrip'
 import StatusChips from './StatusChips'
 import SummaryView from './SummaryView'
 
-type Props = { item: Activity; events: CareEvent[]; conversation?: Conversation; appointment?: Appointment; actions?: ReactNode; extra?: ReactNode }
+type Props = { item: Activity; events: CareEvent[]; conversation?: Conversation; appointment?: Appointment; actions?: ReactNode; extra?: ReactNode; headerAction?: ReactNode }
 
-const place = (snapshot: PlaceSnapshot) => (snapshot.address && snapshot.address !== snapshot.label ? `${snapshot.label}, ${snapshot.address}` : snapshot.label)
-
-export default function ActivityDetailView({ item, events, conversation, appointment, actions, extra }: Props) {
-  const timeline = events.filter((event) => event.ref === item.id).slice().reverse()
-  const { pickup, destination, items } = item.details ?? {}
+function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appointment' | 'actions'>) {
   return (
     <>
-      <a className="back" href="#/activity">Back to activity</a>
       <h1 className="page-title">{item.title}</h1>
       <section className="card">
         <ProviderBadge id={item.app_id ?? item.provider_type} name={item.app_name ?? item.provider_label} />
@@ -23,12 +19,8 @@ export default function ActivityDetailView({ item, events, conversation, appoint
         <dl className="receipt-details">
           {item.provider_booking_id ? <div><dt>Booking reference</dt><dd>{item.provider_booking_id} (simulated)</dd></div> : null}
           <div><dt>Provider</dt><dd>{item.provider_label} (simulated)</dd></div>
-          {pickup ? <div><dt>From</dt><dd>{place(pickup)}</dd></div> : null}
-          {destination ? <div><dt>To</dt><dd>{place(destination)}</dd></div> : null}
-          {items?.map((line) => <div key={line.name}><dt>Item</dt><dd>{line.name} × {line.quantity}</dd></div>)}
+          {item.details?.items?.map((line) => <div key={line.name}><dt>Item</dt><dd>{line.name} × {line.quantity}</dd></div>)}
           <div><dt>Total</dt><dd>{formatINR(item.amount_minor)}</dd></div>
-          {item.pickup_eta_min ? <div><dt>Pickup</dt><dd>About {item.pickup_eta_min} min (estimate)</dd></div> : null}
-          {item.duration_min ? <div><dt>Trip time</dt><dd>About {item.duration_min} min</dd></div> : null}
           {item.delivery_min ? <div><dt>Delivery</dt><dd>About {item.delivery_min} min</dd></div> : null}
           {item.payment ? <div><dt>Payment method</dt><dd>{paymentMethodLabel[item.payment.method]}</dd></div> : null}
           <div><dt>Asked</dt><dd>{formatWhen(item.created_at)} · {item.channel}</dd></div>
@@ -49,6 +41,18 @@ export default function ActivityDetailView({ item, events, conversation, appoint
         </details>
         {actions ? <div className="actions">{actions}</div> : null}
       </section>
+    </>
+  )
+}
+
+export default function ActivityDetailView({ item, events, conversation, appointment, actions, extra, headerAction }: Props) {
+  const timeline = events.filter((event) => event.ref === item.id).slice().reverse()
+  return (
+    <>
+      <a className="back" href="#/activity">Back to activity</a>
+      {item.service === 'ride'
+        ? <RideTrip item={item} appointment={appointment} actions={actions} headerAction={headerAction} />
+        : <OrderCard item={item} appointment={appointment} actions={actions} />}
       {item.questions?.length ? (
         <section className="card">
           <h2>Questions from the Care Circle</h2>

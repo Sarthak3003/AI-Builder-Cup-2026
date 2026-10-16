@@ -276,6 +276,7 @@ def _execute(state: dict, booking: dict, now: float) -> None:
     booking.update(
         booking_status="CONFIRMED_SIMULATED",
         provider_booking_id=result.provider_booking_id,
+        trip=result.trip.model_dump() if result.trip else None,
         updated_at=now,
     )
     wallet = booking["payment"]["method"] == "DEMO_WALLET"

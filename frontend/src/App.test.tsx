@@ -256,7 +256,7 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
   expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
   expect(screen.getByText('Paid (simulated) · no money charged')).toBeInTheDocument()
   expect(screen.getByText(/No money charged\. Demo ride — no real driver will arrive\./)).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'See booking details' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
+  expect(screen.getByRole('link', { name: 'Track your demo ride' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
 })
 
 test('a lost reply is retried with the same key, so the server can return the same booking', async () => {
