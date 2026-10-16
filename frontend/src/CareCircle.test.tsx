@@ -2,6 +2,7 @@ import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
+import ActivityDetailView from './components/ActivityDetailView'
 import type { CareEvent, Conversation, Grant, HubState, Reminder } from './hub'
 import { applyFilters, noFilters } from './filters'
 import { booking, fail, makeCareState, makeState, mealQuote, rideQuote, stubApi } from './test-utils'
@@ -124,8 +125,11 @@ test('activity details show the reference, timeline, sharing switch and separate
   expect(screen.getByText('DEMO-RIDE-1042 (simulated)')).toBeInTheDocument()
   expect(screen.getByText('12 Sample Lane, Demo Nagar (sample address)')).toBeInTheDocument()
   expect(screen.getByText('Booked (simulated): Uber Go to Doctor')).toBeInTheDocument()
-  expect(screen.getByText('CONFIRMED_SIMULATED')).toBeInTheDocument()
-  expect(screen.getByText('PENDING_SIMULATED')).toBeInTheDocument()
+  expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Pending (simulated) · nothing charged yet')).toBeInTheDocument()
+  expect(screen.queryByText('Demo details')).not.toBeInTheDocument()
+  expect(screen.queryByText('CONFIRMED_SIMULATED')).not.toBeInTheDocument()
+  expect(screen.queryByText('PENDING_SIMULATED')).not.toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Confirmed' })).toBeInTheDocument()
   expect(screen.getByRole('heading', { name: 'Suggestions (not done)' })).toBeInTheDocument()
   expect(screen.getByText('Automatic summary (not AI)')).toBeInTheDocument()
@@ -135,6 +139,22 @@ test('activity details show the reference, timeline, sharing switch and separate
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/payment/complete`))).toBe(true)
   await userEvent.click(screen.getByRole('button', { name: 'Demo: mark trip or delivery completed' }))
   expect(calls.some((call) => call.url.endsWith(`/bookings/${booked.id}/complete`))).toBe(true)
+})
+
+test.each([
+  rideQuote(),
+  mealQuote(),
+  rideQuote({ service: 'medicine', service_type: 'PHARMACY', provider_type: 'DEMO_PHARMACY', provider_label: 'Demo Pharmacy Provider', title: 'Sample pharmacy order', notice: 'Demo order — no real pharmacy items will be delivered.' }),
+])('$service details show readable statuses without the technical demo block', (quote) => {
+  const item = booking({ ...quote, payment_method: 'PAY_ON_COMPLETION' }, 'COMPLETED_SIMULATED')
+  render(<ActivityDetailView item={item} events={[]} />)
+  expect(screen.getByText('Completed · simulated')).toBeInTheDocument()
+  expect(screen.getByText('Payment: Pending (simulated) · nothing charged yet')).toBeInTheDocument()
+  expect(screen.getByText(`${item.notice} No money moves.`)).toBeInTheDocument()
+  expect(screen.queryByText('Demo details')).not.toBeInTheDocument()
+  for (const value of [item.booking_status, item.payment!.status, item.provider_type]) {
+    expect(screen.queryByText(value, { exact: true })).not.toBeInTheDocument()
+  }
 })
 
 test('a booked ride reads like a ride app, and every part says it is a demo', async () => {
@@ -320,7 +340,7 @@ test('the owner and a caretaker see the same ride event; the caretaker without a
   expect(screen.getByText('Home')).toBeInTheDocument()
   expect(screen.queryByText(/Sample Lane/)).not.toBeInTheDocument()
   expect(screen.queryByText(/Payment:/)).not.toBeInTheDocument()
-  expect(screen.getByText('not shared with you')).toBeInTheDocument()
+  expect(screen.getByText('Payment details are not shared with you.')).toBeInTheDocument()
 })
 
 test('in the demo a view-only caretaker can try a refused action and sees the server say no', async () => {

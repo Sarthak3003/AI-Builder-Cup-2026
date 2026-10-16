@@ -308,15 +308,6 @@ function Receipt({ hub, receipt, simple, onAgain }: { hub: Hub; receipt: Activit
         {receipt.pickup_eta_min && !waiting ? <div><dt>Pickup</dt><dd>About {receipt.pickup_eta_min} min (estimate)</dd></div> : null}
       </dl>
       <p className="simulation-warning">{payment.status === 'SUCCEEDED_SIMULATED' ? 'No money charged.' : 'Nothing charged.'} {receipt.notice}</p>
-      {simple ? null : (
-        <details className="more">
-          <summary>Demo details</summary>
-          <dl className="receipt-details codes">
-            <div><dt>Booking status</dt><dd><code>{status}</code></dd></div>
-            <div><dt>Payment status</dt><dd><code>{payment.status}</code></dd></div>
-          </dl>
-        </details>
-      )}
       {appointment && status === 'CONFIRMED_SIMULATED' && !simple ? (
         <div className="suggestion">
           <p><strong>Suggestion:</strong> would you like to ask someone in your Care Circle whether they can come to {appointment.title} with you? Nobody is asked unless you choose to.</p>

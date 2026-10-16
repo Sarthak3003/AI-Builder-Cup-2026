@@ -35,14 +35,6 @@ function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appoint
         {item.line_items?.length ? <PriceLines lines={item.line_items} total={item.amount_minor} /> : null}
         {item.failure ? <p className="inline-note">{item.failure}</p> : null}
         <p className="muted">{item.notice} No money moves.</p>
-        <details className="more">
-          <summary>Demo details</summary>
-          <dl className="receipt-details codes">
-            <div><dt>Booking status</dt><dd><code>{item.booking_status}</code></dd></div>
-            <div><dt>Payment status</dt><dd><code>{item.payment?.status ?? 'not shared with you'}</code></dd></div>
-            <div><dt>Provider type</dt><dd><code>{item.provider_type}</code></dd></div>
-          </dl>
-        </details>
         {actions ? <div className="actions">{actions}</div> : null}
       </section>
     </>

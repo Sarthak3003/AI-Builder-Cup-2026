@@ -256,6 +256,9 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
   expect(screen.getByText('Booked · simulated')).toBeInTheDocument()
   expect(screen.getByText('Paid (simulated) · no money charged')).toBeInTheDocument()
   expect(screen.getByText(/No money charged\. Demo ride — no real driver will arrive\./)).toBeInTheDocument()
+  expect(screen.queryByText('Demo details')).not.toBeInTheDocument()
+  expect(screen.queryByText('CONFIRMED_SIMULATED')).not.toBeInTheDocument()
+  expect(screen.queryByText('SUCCEEDED_SIMULATED')).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Track your demo ride' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
 })
 
