@@ -62,7 +62,9 @@ def configured() -> bool:
     return bool(os.environ.get("SAATHI_GEMINI_API_KEY"))
 
 
-def _generate[Reply: BaseModel](parts: list[dict], profile: dict, schema: type[Reply]) -> Reply:
+def _generate[Reply: BaseModel](
+    parts: list[dict], profile: dict, schema: type[Reply], *, timeout: float = 25
+) -> Reply:
     key = os.environ.get("SAATHI_GEMINI_API_KEY")
     if not key:
         raise HTTPException(503, "Gemini is not configured. Switch to offline demo mode.")
@@ -86,7 +88,7 @@ def _generate[Reply: BaseModel](parts: list[dict], profile: dict, schema: type[R
         headers={"Content-Type": "application/json", "x-goog-api-key": key},
     )
     try:
-        with urlopen(request, timeout=25) as response:
+        with urlopen(request, timeout=timeout) as response:
             result = json.load(response)
         reply = result["candidates"][0]["content"]["parts"]
         return schema.model_validate_json("".join(part.get("text", "") for part in reply))
@@ -96,8 +98,8 @@ def _generate[Reply: BaseModel](parts: list[dict], profile: dict, schema: type[R
         ) from None
 
 
-def draft_request(message: str, profile: dict) -> Draft:
-    return _generate([{"text": message}], profile, Draft)
+def draft_request(message: str, profile: dict, *, timeout: float = 25) -> Draft:
+    return _generate([{"text": message}], profile, Draft, timeout=timeout)
 
 
 def hear_request(audio: bytes, mime_type: str, profile: dict) -> Heard:

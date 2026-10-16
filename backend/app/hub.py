@@ -53,7 +53,7 @@ from app.care import (
     summarise,
     visible_events,
 )
-from app.config import Settings
+from app.config import PhoneSettings, Settings
 from app.conversation import ConversationEngine, Turn, new_session
 from app.domain import PAYMENT_METHODS, PaymentMethod, ServiceType
 from app.hub_store import HubStore, initial_state
@@ -82,6 +82,7 @@ from app.onboarding import (
 from app.phone import PhoneService
 from app.providers import APP_IDS, apps_catalogue, enabled_apps
 from app.seed import SAMPLE_PLACES, seed
+from app.telephony import twilio_router
 from app.workflows import ai_profile, next_appointment, record, remember
 
 
@@ -191,12 +192,6 @@ class AssistantRequest(BaseModel):
 class PairingCodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     retain_transcript: bool = False
-
-
-class PairCallIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    session_id: str = Field(min_length=40, max_length=40, pattern=r"^[a-f0-9]+$")
-    code: str = Field(max_length=64)
 
 
 class VoiceRequest(BaseModel):
@@ -314,7 +309,14 @@ def hub_router(config: Settings):
         return who
 
     actor = Depends(identity)
-    phone = PhoneService(store, key)
+    phone_config = PhoneSettings()
+    phone = PhoneService(
+        store,
+        key,
+        max_calls=phone_config.max_calls,
+        duration=phone_config.max_duration,
+        max_turns=phone_config.max_turns,
+    )
 
     def mutate(who, action, owner_only=False):
         if owner_only and who["role"] != "owner":
@@ -390,6 +392,7 @@ def hub_router(config: Settings):
             "roles": {role: ROLES[role] for role in ROLES},
             "sensitive": sorted(SENSITIVE),
             "demo_controls": demo_controls,
+            "phone": {"enabled": phone_config.enabled, "number": phone_config.number},
             "role": who["role"],
             "storage": store.mode,
             "mode": "offline-demo",
@@ -664,11 +667,6 @@ def hub_router(config: Settings):
     def pairing_code(body: PairingCodeIn, who=actor):
         mutate(who, lambda state: None, owner_only=True)
         return phone.create_code(who["owner"], retain_transcript=body.retain_transcript)
-
-    @router.post("/phone/pair")
-    def pair_call(body: PairCallIn, who=actor):
-        mutate(who, lambda state: None, owner_only=True)
-        return phone.pair(body.session_id, body.code, controller=who["owner"])
 
     @router.get("/phone/sessions/{session_id}")
     def phone_session(session_id: str, who=actor):
@@ -1342,4 +1340,7 @@ def hub_router(config: Settings):
 
         return mutate(who, clear, True)
 
-    return router
+    combined = APIRouter()
+    combined.include_router(router)
+    combined.include_router(twilio_router(phone, phone_config))
+    return combined

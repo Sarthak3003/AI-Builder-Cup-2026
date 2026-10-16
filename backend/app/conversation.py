@@ -13,7 +13,14 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import assistant
-from app.bookings import ConfirmIn, QuoteIn, confirm_quote, create_quotes, match_place
+from app.bookings import (
+    ConfirmIn,
+    QuoteIn,
+    confirm_quote,
+    create_quotes,
+    expire_approvals,
+    match_place,
+)
 from app.care import ensure
 from app.domain import rupees
 from app.hub_store import initial_state
@@ -172,14 +179,33 @@ def booking_reply(booking):
 
 
 class ConversationEngine:
-    def interpret(self, message: str, profile: dict, *, use_ai=True):
+    def interpret(self, message: str, profile: dict, *, use_ai=True, timeout=None):
         if use_ai and assistant.configured():
             try:
-                return assistant.draft_request(message, profile), "", "gemini"
+                kwargs = {"timeout": timeout} if timeout is not None else {}
+                return assistant.draft_request(message, profile, **kwargs), "", "gemini"
             except HTTPException:
                 pass
         draft, question = understand(message, profile)
         return draft, question, "keywords"
+
+    def prepare(self, state, session, turn: Turn):
+        text = " ".join(turn.message.lower().strip(" .!?।").replace(",", " ").split())
+        if (
+            turn.kind != "speech"
+            or session["state"] not in {"NEW", "COLLECTING_DETAILS"}
+            or session["waiting_for"] in {"pickup", "destination"}
+            or text in YES | NO | REPEAT
+            or private_text(turn.message) != turn.message
+            or any(word in text for word in EMERGENCY_WORDS)
+        ):
+            return None
+        message = turn.message
+        if session["waiting_for"] == "meal":
+            inferred, _ = understand(message, state["profile"])
+            if not inferred or inferred.service != "ride":
+                message = "order food " + message
+        return self.interpret(message, state["profile"], timeout=4)[0]
 
     def app_request(self, state, conv_id, message, channel, draft, question, by, appointment=None):
         if looks_like_scam(message):
@@ -240,6 +266,7 @@ class ConversationEngine:
         """Advance atomically using rules or a precomputed draft; never call AI here."""
         now = time.time() if now is None else now
         ensure(state)
+        expire_approvals(state, now=now)
         if turn.event_id in session["seen"]:
             return copy.deepcopy(session["seen"][turn.event_id])
         if turn.revision is not None and turn.revision != session["revision"]:
@@ -250,6 +277,7 @@ class ConversationEngine:
         message = turn.message.strip()
         reply = self._advance(state, session, turn, draft, now)
         session["revision"] += 1
+        session["last_at"] = now
         session["last_reply"] = reply
         if session["state"] in TERMINAL:
             session["ended_at"] = session["ended_at"] or now
@@ -364,16 +392,21 @@ class ConversationEngine:
                     "That quote expired or changed. Please start a new request for a fresh price."
                 )
             transition(session, "EXECUTING")
-            booking, created = confirm_quote(
-                state,
-                quoted["id"],
-                ConfirmIn(
-                    idempotency_key=f"conversation-{session['id']}-{pending['id']}",
-                    confirmed=True,
-                ),
-                enabled_apps(state["profile"]),
-                now=now,
-            )
+            try:
+                booking, created = confirm_quote(
+                    state,
+                    quoted["id"],
+                    ConfirmIn(
+                        idempotency_key=f"turn-{session['id']}-{pending['id']}",
+                        confirmed=True,
+                    ),
+                    enabled_apps(state["profile"]),
+                    now=now,
+                )
+            except HTTPException:
+                _invalidate(state, session)
+                transition(session, "FAILED")
+                return "This demo booking could not be confirmed. Check your app before retrying."
             session["booking_id"] = booking["id"]
             target = (
                 "AWAITING_EXTERNAL_APPROVAL"
@@ -441,7 +474,13 @@ class ConversationEngine:
             session["waiting_for"] = None
         if given:
             session["service"] = given.service
-            session["draft"].update(given.model_dump(exclude_none=True, exclude={"clarification"}))
+            session["draft"].update(
+                {
+                    k: v
+                    for k, v in given.model_dump(exclude_none=True).items()
+                    if k != "clarification" and v != ""
+                }
+            )
         if not session["service"]:
             return _question(
                 session, "intent", "Do you need a ride or a meal?", "सवारी या भोजन चाहिए?"
@@ -517,6 +556,7 @@ class ConversationEngine:
             transcript=[{"role": e["role"], "text": e["text"]} for e in session["events"]],
             transcript_retained=session["retain_transcript"],
             ended_at=session["ended_at"],
+            updated_at=session.get("last_at", session["created_at"]),
         )
         del state["conversations"][100:]
 
@@ -530,6 +570,7 @@ class ConversationEngine:
             "reply": session["last_reply"],
             "service": session["service"],
             "paired": session["paired"],
+            "language": session["language"],
             "booking_id": session["booking_id"],
             "request_id": session["request_id"],
             "pending_action": {k: v for k, v in pending.items() if k != "fingerprint"}
