@@ -79,6 +79,7 @@ from app.onboarding import (
     set_home_address,
     sync_home,
 )
+from app.phone import PhoneService
 from app.providers import APP_IDS, apps_catalogue, enabled_apps
 from app.seed import SAMPLE_PLACES, seed
 from app.workflows import ai_profile, next_appointment, record, remember
@@ -185,6 +186,17 @@ class AssistantRequest(BaseModel):
     id: UUID
     message: str = Field(min_length=3, max_length=1000)
     channel: Literal["app", "message", "voice"] = "app"
+
+
+class PairingCodeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    retain_transcript: bool = False
+
+
+class PairCallIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=40, max_length=40, pattern=r"^[a-f0-9]+$")
+    code: str = Field(max_length=64)
 
 
 class VoiceRequest(BaseModel):
@@ -302,6 +314,7 @@ def hub_router(config: Settings):
         return who
 
     actor = Depends(identity)
+    phone = PhoneService(store, key)
 
     def mutate(who, action, owner_only=False):
         if owner_only and who["role"] != "owner":
@@ -646,6 +659,22 @@ def hub_router(config: Settings):
             return engine.view(session)
 
         return mutate(who, save, owner_only=True)
+
+    @router.post("/phone/pairing-codes")
+    def pairing_code(body: PairingCodeIn, who=actor):
+        mutate(who, lambda state: None, owner_only=True)
+        return phone.create_code(who["owner"], retain_transcript=body.retain_transcript)
+
+    @router.post("/phone/pair")
+    def pair_call(body: PairCallIn, who=actor):
+        mutate(who, lambda state: None, owner_only=True)
+        return phone.pair(body.session_id, body.code, controller=who["owner"])
+
+    @router.get("/phone/sessions/{session_id}")
+    def phone_session(session_id: str, who=actor):
+        if who["role"] != "owner":
+            raise HTTPException(403, "Only the account owner can read phone sessions.")
+        return phone.read(session_id, owner=who["owner"])
 
     @router.post("/conversation-sessions/{session_id}/turns")
     def conversation_turn(session_id: str, body: Turn, who=actor):
