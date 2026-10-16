@@ -189,6 +189,14 @@ class SwitchIn(BaseModel):
     to: str = Field(min_length=1, max_length=40)
 
 
+class DemoResetIn(BaseModel):
+    """fresh: an empty profile that starts at setup. meera: Meera's finished setup and history."""
+
+    model_config = ConfigDict(extra="forbid")
+    scenario: Literal["fresh", "meera"]
+    confirm: Literal[True]
+
+
 class AssistantRequest(BaseModel):
     id: UUID
     message: str = Field(min_length=3, max_length=1000)
@@ -1201,9 +1209,13 @@ def hub_router(config: Settings):
 
         return mutate(who, store_summary)
 
-    @router.post("/demo/seed")
-    def demo_seed(response: Response, who=actor):
-        """Demo control: replace this account with Meera's scripted demo and fresh invites."""
+    @router.post("/demo/reset")
+    def demo_reset(body: DemoResetIn, response: Response, who=actor):
+        """Demo control: replace this account's data with a known starting point.
+
+        Needs confirm=true, so a stray request cannot wipe a demo. Meera's scenario also
+        returns fresh one-use invitations for Asha and Ravi.
+        """
         if not demo_controls:
             raise HTTPException(404, "Not available.")
         who["demo"] = True
@@ -1211,13 +1223,14 @@ def hub_router(config: Settings):
         def load(state):
             state.clear()
             state.update(ensure(initial_state()))
-            grants = seed(state)
-            invites = [
-                {"name": g["name"], "role": g["role"], "code": invite_code(who["owner"], g)}
-                for g in grants
-            ]
-            record(state, "demo_seeded")
-            return {"state": public(state, who), "invites": invites}
+            invites = []
+            if body.scenario == "meera":
+                invites = [
+                    {"name": g["name"], "role": g["role"], "code": invite_code(who["owner"], g)}
+                    for g in seed(state)
+                ]
+            record(state, f"demo_reset_{body.scenario}")
+            return {"scenario": body.scenario, "state": public(state, who), "invites": invites}
 
         result = mutate(who, load, owner_only=True)
         cookie(response, who)

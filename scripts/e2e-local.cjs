@@ -1,5 +1,6 @@
-// The scripted hackathon demo as an end-to-end run: Meera (owner), Asha (approver) and Ravi (viewer)
-// in three separate browser contexts, phone-sized, against a running backend (8000) and frontend (5173).
+// The plan's scripted hackathon demo, end to end, phone-sized, against a running backend (8000) and
+// frontend (5173) with demo controls on. Meera and her caretakers use separate browser contexts.
+// Part 1 is the scripted demo from a fresh start; part 2 is Meera's seeded approval demo.
 // Usage: SAATHI_BROWSER_CHANNEL=chrome node scripts/e2e-local.cjs   (default channel: msedge)
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -9,89 +10,137 @@ const BASE = process.env.BASE_URL || 'http://127.0.0.1:5173';
 const PHONE = { width: 390, height: 844 };
 const tab = (page, name) => page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: new RegExp(`^${name}\\b`) });
 
+async function rideToDoctor(page) {
+  await page.goto(`${BASE}/#/request/ride`);
+  await page.getByRole('combobox', { name: 'Where to?' }).selectOption({ label: 'Doctor' });
+  await page.getByRole('button', { name: 'Get demo prices' }).click();
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: process.env.SAATHI_BROWSER_CHANNEL || 'msedge' });
   const open = async () => (await browser.newContext({ viewport: PHONE })).newPage();
-  const meera = await open();
   const errors = [];
+  const meera = await open();
   meera.on('pageerror', (error) => errors.push(error.message));
 
-  // 1. Load the seeded demo and collect the two caretaker invitation links.
+  // 0. Fresh start: the demo reset asks for confirmation, then opens setup.
   await meera.goto(`${BASE}/#/profile`);
-  await meera.getByRole('button', { name: /Load Meera's demo/ }).click();
-  await meera.getByRole('button', { name: 'Yes, replace my demo data' }).click();
-  await meera.getByText("Meera's demo is loaded.").waitFor();
-  const [ashaLink, raviLink] = await meera.locator('.invite-box input').evaluateAll((inputs) => inputs.map((input) => input.value));
+  await meera.getByRole('button', { name: 'Start fresh at setup' }).click();
+  await meera.getByRole('button', { name: 'Yes, reset the demo' }).click();
+  await meera.getByRole('heading', { name: 'Welcome' }).waitFor();
 
-  const asha = await open();
-  await asha.goto(ashaLink);
-  await asha.getByRole('button', { name: 'Join as caretaker' }).click();
-  await asha.getByRole('heading', { name: 'Supporting Meera' }).waitFor();
+  // 1. Set up as Meera: usual pickup, Doctor, Demo Ride Provider, demo wallet, a view-only caretaker.
+  await meera.getByRole('textbox', { name: 'What should Saathi call you?' }).fill('Meera');
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Comfort and accessibility' }).waitFor();
+  await meera.getByRole('checkbox', { name: 'Larger text' }).check();
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Saved places' }).waitFor();
+  for (const place of ['Home', 'Doctor']) {
+    await meera.getByRole('button', { name: `Use sample: ${place}` }).click();
+    await meera.getByRole('button', { name: 'Save place' }).click();
+    await meera.getByRole('list', { name: 'Saved places' }).getByText(place, { exact: true }).waitFor();
+  }
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Care Circle' }).waitFor();
+  await meera.getByRole('textbox', { name: 'Their name' }).fill('Ravi');
+  await meera.getByRole('textbox', { name: 'How you know them (optional)' }).fill('Son');
+  await meera.getByRole('button', { name: 'Add to my Care Circle' }).click();
+  const raviLink = await meera.getByRole('textbox', { name: 'Invitation link for Ravi' }).inputValue();
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Demo services' }).waitFor();
+  await meera.getByRole('button', { name: 'Connect Demo Ride Provider' }).click();
+  await meera.getByRole('button', { name: 'Disconnect Demo Ride Provider' }).waitFor();
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Payment (simulated)' }).waitFor();
+  await meera.getByRole('radio', { name: /^Demo wallet \(simulated\)/ }).check();
+  await meera.getByRole('button', { name: 'Continue' }).click();
+  await meera.getByRole('heading', { name: 'Review and finish' }).waitFor();
+  await meera.getByText('Ravi can see shared activity (view only)').waitFor();
+  await meera.getByRole('button', { name: 'Yes, finish setup' }).click();
+  await meera.getByRole('heading', { name: 'You are all set, Meera' }).waitFor();
+
+  // 2. A ride to the doctor: server prices, then the full price and the demo warning before any booking.
+  await rideToDoctor(meera);
+  await meera.getByRole('button', { name: 'Choose Rapido Auto from Rapido' }).click();
+  await meera.getByRole('heading', { name: 'Check and confirm' }).waitFor();
+  await meera.getByText('Demo ride — no real driver will arrive.').waitFor();
+  assert.equal(await meera.locator('.review-price').innerText(), '₹83');
+
+  // 3. Confirm: a stable demo reference, separate booking and payment statuses, no money charged.
+  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
+  await meera.getByRole('heading', { name: 'Demo booking confirmed' }).waitFor();
+  await meera.getByText('DEMO-RIDE-1042').waitFor();
+  await meera.getByText('Booked · simulated').waitFor();
+  await meera.getByText('Paid (simulated) · no money charged').waitFor();
+  await meera.getByText(/^No money charged\./).waitFor();
+  await meera.getByText('Demo details').click();
+  await meera.getByText('CONFIRMED_SIMULATED').waitFor();
+  await meera.getByText('SUCCEEDED_SIMULATED').waitFor();
+  const detail = await meera.getByRole('link', { name: 'See booking details' }).getAttribute('href');
+
+  // 4. The same event in Meera's timeline and in Ravi's Care Circle view, without addresses or payment.
+  await tab(meera, 'Activity').click();
+  const mine = meera.getByRole('region', { name: 'Timeline' });
+  await mine.getByText('Booked (simulated): Rapido Auto to Doctor').waitFor();
   const ravi = await open();
+  ravi.on('pageerror', (error) => errors.push(error.message));
   await ravi.goto(raviLink);
   await ravi.getByRole('button', { name: 'Join as caretaker' }).click();
   await ravi.getByRole('heading', { name: 'Supporting Meera' }).waitFor();
+  await tab(ravi, 'Activity').click();
+  await ravi.getByRole('region', { name: 'Timeline' }).getByText('Booked (simulated): Rapido Auto to Doctor').waitFor();
+  await ravi.goto(`${BASE}/${detail}`);
+  await ravi.getByRole('heading', { name: 'Rapido Auto to Doctor' }).waitFor();
+  const seen = await ravi.locator('main').innerText();
+  assert(!/Sample Lane|Example Road|Paid \(simulated\)/.test(seen), 'Ravi sees an address or payment he was not given');
 
-  // 2. Care coordination: Meera asks for her doctor's appointment; Saathi uses the saved appointment.
-  await meera.goto(`${BASE}/#/`);
-  await meera.getByRole('textbox', { name: 'Or type it here' }).fill("Please take me to my doctor's appointment");
-  await meera.getByRole('button', { name: 'Ask Saathi' }).click();
-  await meera.getByText('For your appointment:').waitFor();
-  await meera.getByRole('button', { name: /^Choose Ola Mini from Ola$/ }).click();
-  await meera.getByRole('button', { name: 'Book with Ola' }).click();
-  await meera.getByRole('heading', { name: 'Sent for approval' }).waitFor();
-  await meera.getByText('Not charged (simulated)').waitFor();
+  // 5. Ravi tries what view-only access does not allow; the server refuses.
+  await ravi.getByRole('button', { name: 'Try to cancel this booking' }).click();
+  await ravi.getByText('Refused by the server: Only the account owner can perform this action.').waitFor();
+  await ravi.getByRole('button', { name: 'Try to approve this booking' }).click();
+  await ravi.getByText(/^Refused by the server: Not shared with you/).waitFor();
 
-  // 3. Asha approves in her own dashboard; Meera's same task becomes booked, payment still separate.
-  await asha.goto(`${BASE}/#/approvals`);
-  await asha.reload();
-  await asha.locator('article.activity', { hasText: 'Ola Mini' }).getByRole('button', { name: 'Approve' }).click();
-  await asha.getByText('Approved. The booking is confirmed (simulated).').waitFor();
-  await meera.goto(`${BASE}/#/activity`);
-  await meera.reload();
-  const ride = meera.locator('article.activity', { hasText: 'Ola Mini' });
-  await ride.getByText('Booked · simulated').waitFor();
-  await ride.getByText('Payment: Pay on completion (simulated) · nothing charged yet').waitFor();
-
-  // 4. Ravi (viewer) sees the ride, cannot approve or read conversations, and the API refuses him too.
-  await ravi.reload();
-  await tab(ravi, 'Approvals').click();
-  await ravi.getByText(/has not given you access to approving requests/).waitFor();
-  const refused = await ravi.evaluate(async () => {
-    const state = await (await fetch('/api/hub/state')).json();
-    const target = state.activity[0];
-    const response = await fetch(`/api/hub/activity/${target.id}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
-    return { status: response.status, payments: state.activity.some((item) => 'payment' in item), medicines: state.profile.medicines.length };
-  });
-  assert.deepEqual(refused, { status: 403, payments: false, medicines: 0 });
-  await tab(ravi, 'Chats').click();
-  await ravi.getByText(/access to conversation summaries/).waitFor();
-
-  // 5. Forced failure: shown as failed, nothing booked or charged, and Asha gets an alert.
+  // 6. A forced failure: neither booking nor payment is marked successful, and the first ride is unchanged.
   await meera.goto(`${BASE}/#/profile`);
   await meera.getByRole('button', { name: 'Make the next booking fail' }).click();
-  await meera.goto(`${BASE}/#/request/ride`);
-  await meera.getByRole('textbox', { name: 'Where to?' }).fill('Market');
-  await meera.getByRole('button', { name: 'Show options' }).click();
-  await meera.getByRole('button', { name: /^Choose Rapido Auto from Rapido$/ }).click();
-  await meera.getByRole('button', { name: 'Book with Rapido' }).click();
+  await meera.getByText(/The next booking you confirm will fail/).waitFor();
+  await rideToDoctor(meera);
+  await meera.getByRole('button', { name: 'Choose Rapido Auto from Rapido' }).click();
+  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
   await meera.getByRole('heading', { name: 'Booking failed' }).waitFor();
-  await meera.getByText(/Nothing was booked and nothing was charged/).waitFor();
-  await asha.goto(`${BASE}/#/safety`);
+  await meera.getByText('Failed · nothing booked').waitFor();
+  await meera.getByText('Not charged (simulated)').waitFor();
+  await meera.goto(`${BASE}/${detail}`);
+  await meera.getByText('Booked · simulated').first().waitFor();
+
+  // Part 2. Meera's seeded demo: Ola Mini (₹125) is above her ₹100 limit, so Asha must approve.
+  await meera.goto(`${BASE}/#/profile`);
+  await meera.getByRole('button', { name: "Load Meera's demo" }).click();
+  await meera.getByRole('button', { name: 'Yes, reset the demo' }).click();
+  await meera.getByText("Meera's demo is loaded.").waitFor();
+  const ashaLink = await meera.getByRole('textbox', { name: 'Asha (approver)' }).inputValue();
+  const asha = await open();
+  asha.on('pageerror', (error) => errors.push(error.message));
+  await asha.goto(ashaLink);
+  await asha.getByRole('button', { name: 'Join as caretaker' }).click();
+  await asha.getByRole('heading', { name: 'Supporting Meera' }).waitFor();
+  await rideToDoctor(meera);
+  await meera.getByRole('button', { name: 'Choose Ola Mini from Ola' }).click();
+  await meera.getByText(/must approve this first/).waitFor();
+  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
+  await meera.getByRole('heading', { name: 'Sent for approval' }).waitFor();
+  await tab(asha, 'Approvals').click();
   await asha.reload();
-  await asha.getByText('Booking failed: Rapido Auto with Rapido').waitFor();
+  await asha.locator('article', { hasText: 'Ola Mini to Doctor' }).getByRole('button', { name: 'Approve' }).click();
+  await asha.getByText(/Approved\./).waitFor();
+  await meera.goto(`${BASE}/#/activity`);
+  await meera.locator('article.activity', { hasText: 'Ola Mini to Doctor' }).getByText('Booked · simulated').waitFor();
 
-  // 6. Revoking Ravi takes effect on his very next request.
-  await meera.goto(`${BASE}/#/family`);
-  await meera.locator('li.member', { hasText: 'Ravi' }).getByRole('button', { name: 'Remove' }).click();
-  await meera.getByText('Ravi no longer has access.').waitFor();
-  await ravi.reload();
-  await ravi.getByText('Your Care Circle access was removed.').waitFor();
-
-  for (const page of [meera, asha]) {
+  for (const page of [meera, ravi, asha]) {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'page scrolls sideways on a phone');
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: seed, two caretakers join, appointment ride, delegated approval, viewer refused (UI and API), forced failure, revocation, no page errors');
+  console.log('PASS: fresh reset, setup as Meera, ride quote, confirm (DEMO-RIDE-1042), shared timeline, viewer refused by the server, forced failure, seeded approval, no page errors');
   await browser.close();
 })().catch((error) => { console.error(error.stack); process.exit(1); });

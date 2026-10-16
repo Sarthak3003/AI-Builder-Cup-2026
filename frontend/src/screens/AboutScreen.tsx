@@ -58,13 +58,13 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
       <section className="card">
         <h2>Your demo data</h2>
         <button className="secondary wide" onClick={exportData}>Export my demo data</button>
-        {state.role === 'owner' ? <button className="secondary wide" onClick={() => setResetPending(true)}>Reset demo data</button> : null}
+        {state.role === 'owner' ? <button className="secondary wide" onClick={() => setResetPending(true)}>Delete my data</button> : null}
         {resetPending ? (
           <div className="confirmation">
-            <p>Clear this profile, activity and caregiver access?</p>
+            <p>Delete this profile, its activity and everyone&rsquo;s Care Circle access? This cannot be undone.</p>
             <button className="primary wide" disabled={busy}
-              onClick={() => void run(async () => { setState(await api<HubState>('/data', 'DELETE')); setResetPending(false); notify('Demo data reset.') })}>
-              Yes, reset my demo
+              onClick={() => void run(async () => { setState(await api<HubState>('/data', 'DELETE')); setResetPending(false); notify('Your data was deleted.') })}>
+              Yes, delete my data
             </button>
             <button className="secondary wide" onClick={() => setResetPending(false)}>Keep my data</button>
           </div>

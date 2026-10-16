@@ -12,7 +12,7 @@ An accessible everyday companion: call, message, or use the app with one shared 
 
 The selected deployment uses Firebase Hosting, Firestore, Cloud Run in Mumbai (`asia-south1`) and a server-only Gemini key in Secret Manager. Visitors enter automatically with isolated, signed 24-hour demo sessions; no Google login or Firebase Authentication setup is required. Start with [the deployment guide](docs/deployment.md). `scripts/deploy-google.ps1` requires an explicit new `-ProjectId` and `-GeminiModel`; it generates a local plan unless `-Apply` is supplied. The old deployment passed health checks and owner-confirmed sign-in/Gemini tests before project shutdown was requested. This anonymous-session version has been tested locally, not deployed. Cost review precedes new billable work.
 
-This branch also turns the prototype into a mobile-first, installable web app (PWA) in Google's colours, and adds simulated provider apps: Uber, Ola and Rapido for rides, Uber Eats, Swiggy and Zomato for food. They are clearly labelled demos. Saathi is not connected to those companies, nothing is booked or charged, and a real connection would need each company's approval and the user's own sign-in. The point of the flow is that an older person asks Saathi, reviews the choice and confirms, instead of calling family to book for them.
+This branch also turns the prototype into a mobile-first, installable web app (PWA) in Google's colours, with a guided setup, three simulated providers (the Demo Ride Provider, Demo Food Provider and Demo Pharmacy Provider), prices set by the server, explicit confirmation, and simulated payments. Familiar names (Uber, Ola and Rapido for rides; Uber Eats, Swiggy and Zomato for food) appear only as labels on demo options. Saathi is not connected to those companies, and every booking is made by a demo provider. Nothing is dispatched, delivered or charged, and Saathi never asks for card numbers, UPI PINs, OTPs or bank logins. The point of the flow is that an older person asks Saathi, checks the price and confirms, instead of calling family to book for them.
 
 ## Run locally
 
@@ -69,11 +69,11 @@ With the backend and frontend running, open http://127.0.0.1:5173. The app is on
    - **Without Gemini**: the browser's own speech recognition (Chrome, Edge or Safari, which may send audio to their own servers) plus simple English and Hindi word matching (not AI).
 
    To turn Gemini on, create a key in Google AI Studio, then in the terminal that starts the backend run `read -s SAATHI_GEMINI_API_KEY && export SAATHI_GEMINI_API_KEY` (type or paste the key; it is not shown or saved in shell history) and restart the backend. `SAATHI_GEMINI_MODEL` overrides the default model, `gemini-3.8-flash`. Never commit the key.
-3. **Book a ride**: type a destination (or press Use microphone), then Show options. Rapido, Ola and Uber each quote a fare and arrival time, marked Demo.
-4. **Choose, review, book**: pick an option, read the review, then press Book with the chosen app. Nothing is booked before that button. The result shows a simulated reference.
-5. **Order food**: the same flow for Uber Eats, Swiggy and Zomato, following the diet, spice and budget saved in Profile.
-6. **Apps**: turn each demo app on or off. Switch Uber off and the next ride comparison leaves it out.
-7. **Activity**: upcoming appointments and reminders, then every booking with its app, booking status and, separately, its simulated payment status. Filter by type, status and date; open a booking for its details and timeline.
+3. **Set up once**: a new browser starts in a seven-step setup: name and language, comfort settings, saved places (one is the usual pickup; sample addresses are one tap away), an optional Care Circle person (view only, or view and approve), demo services to connect, how simulated payments work (Demo wallet or Pay on completion), then a review that needs a clear "Yes, finish setup". Each step is saved on the server as you go: leave and come back, and setup resumes at the first unfinished step. Profile → Your setup reopens any step.
+4. **Book a ride**: choose where to (a saved place or somewhere else) and press **Get demo prices**. The server quotes Rapido Auto, Ola Mini and Uber Go with fares and pickup times, held for 15 minutes. Choose one to reach **Check and confirm**: the price line by line, the payment method, "Demo ride — no real driver will arrive." and **Confirm demo booking**. Nothing is booked before that button. The receipt shows a reference such as DEMO-RIDE-1042, the booking status and, separately, the payment status, with "No money charged".
+5. **Order food or pharmacy items**: pick a fictional kitchen (listed under Uber Eats, Swiggy or Zomato) and dishes, or sample non-prescription pharmacy items such as ORS sachets or bandages (not medical advice and not a real pharmacy order). The server prices each line and adds the demo delivery fee; the same check-and-confirm step follows.
+6. **Services**: connect, disconnect or reset each demo provider, and choose which familiar-name options appear. A service that is not connected cannot be booked; the request screen explains this and offers to connect it.
+7. **Activity**: upcoming appointments and reminders, then every booking with its booking status and, separately, its simulated payment status. Filter by type, status and date; open a booking for its price lines, reference and history, to cancel it, or (demo only) to mark it completed or its simulated payment complete. The **Timeline** lists every event: the same record the Care Circle sees, minus anything not shared with them.
 8. **Family (Care Circle)**: invite trusted people with a role and explicit permissions, choose what is shared, manage trusted contacts and ask for help. See [Care Circle Dashboard](#care-circle-dashboard).
 9. **Profile**: larger text, high contrast, Hindi voice language and preferences. The **About this demo** link in the footer lists what is real and what is simulated.
 
@@ -99,6 +99,59 @@ SAATHI_ALLOWED_ORIGINS=http://198.51.100.20:5173 .venv/bin/python -m uvicorn app
 
 Then open `http://198.51.100.20:5173` on the phone. Without `SAATHI_ALLOWED_ORIGINS` the backend refuses the phone's requests as cross-site. `--host 0.0.0.0` lets anyone on that network reach the demo, which holds no real data, so use a network you trust and stop the server afterwards. Voice input and install are unavailable over plain http.
 
+## How bookings work
+
+Everything runs in the existing FastAPI app and the existing per-browser account document (SQLite locally, Firestore when configured). There is no new database and no new sign-in system. Every provider and payment is simulated ("Model C"); no real provider or payment API is ever called.
+
+| Piece | File | Role |
+| --- | --- | --- |
+| Domain types | `backend/app/domain.py` | Service, provider, connection, quote, booking, payment and approval statuses. Money is whole paise. |
+| Demo providers | `backend/app/providers.py` | `DemoRideProvider`, `DemoFoodProvider` and `DemoPharmacyProvider` behind one `ServiceProvider` interface: quote, create booking (idempotent by key), cancel and complete. Prices, times and references (DEMO-RIDE-1042, 1043, …) are deterministic. |
+| Setup | `backend/app/onboarding.py` | Setup steps and progress, saved places, demo connections, the payment choice and the review. |
+| Quotes and bookings | `backend/app/bookings.py` | Quotes with expiry, confirmation, approvals, booking and payment records, cancellation and completion. |
+| Care Circle views | `backend/app/care.py` | What each caretaker may see; permission checks. |
+| Routes | `backend/app/hub.py` | Everything under `/api/hub` (below). |
+| Screens | `frontend/src/onboarding/`, `src/screens/RequestScreen.tsx`, `ServicesScreen.tsx`, `src/components/ActivityTimeline.tsx`, `DemoControls.tsx` | Setup, request, check and confirm, receipt, services, timeline and demo controls. |
+
+The rules the server enforces:
+
+- **Prices come from the server.** The browser sends only what was chosen (place ids, option, item ids and quantities). A quote holds its price for 15 minutes, belongs to one account and can be confirmed once. Expired, used, unknown or altered quotes are refused.
+- **Nothing is booked without a clear yes.** Confirming needs `{"confirmed": true, "idempotency_key": "…"}`. A booking record is only written at that moment.
+- **One booking per key.** The same key returns the same booking, so a double tap or a network retry makes one booking and one payment record.
+- **Approval first, where the owner asked for it.** With an approver in the Care Circle and approvals on, bookings above the owner's limit and every pharmacy order wait as `AWAITING_APPROVAL`, with payment `NOT_CHARGED_SIMULATED`, until an approver decides. A declined or expired approval books nothing.
+- **Booking and payment are separate fields.** Booking: `AWAITING_APPROVAL`, `CONFIRMED_SIMULATED`, `COMPLETED_SIMULATED`, `FAILED`, `CANCELLED_SIMULATED`, `DECLINED`. Payment: `PENDING_SIMULATED`, `SUCCEEDED_SIMULATED`, `FAILED_SIMULATED`, `NOT_CHARGED_SIMULATED`. Demo wallet bookings are paid (simulated) on confirmation; pay-on-completion stays pending until the trip or delivery is marked completed. A failed booking is `FAILED` with `NOT_CHARGED_SIMULATED`, never a success. Cancelling a paid booking records a separate simulated refund.
+- **One record, many views.** Every change is one transaction on the account document, and an error rolls back the whole change. The owner's timeline and each caretaker's view read the same stored events. Caretakers get only what their permissions allow: never addresses, retry keys or quote ids, and payment status or pharmacy item names only with those permissions.
+
+API (owner session unless stated):
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/hub/onboarding` | Setup progress, places, connections and the review |
+| `PATCH /api/hub/onboarding/profile` | Name, language, comfort, channel, approval rule, payment method; marks a step when `step` is given |
+| `POST /api/hub/onboarding/locations`, `DELETE …/locations/{id}` | Save, change or remove a place; exactly one usual pickup |
+| `POST /api/hub/onboarding/caretaker-grants` | Invite a viewer, or an approver (`can_approve`) |
+| `POST /api/hub/onboarding/steps/{step}` | Mark a step done, or skip an optional one |
+| `POST /api/hub/onboarding/finish` | Finish setup; needs `{"confirmed": true}` |
+| `GET /api/hub/services` | Demo providers, their status, capabilities and catalogue |
+| `POST /api/hub/services/{RIDE,FOOD,PHARMACY}/connect-demo`, `/disconnect`, `/reset` | Manage a demo connection; connecting needs `{"consent": true}` |
+| `POST /api/hub/quotes` | Server-priced quotes for a ride, meal or pharmacy order |
+| `POST /api/hub/quotes/{id}/confirm` | Book (or send for approval); idempotent by key |
+| `GET /api/hub/bookings`, `GET /api/hub/bookings/{id}` | Bookings with their separate payment records |
+| `POST /api/hub/bookings/{id}/cancel`, `/complete`, `/payment/complete` | Cancel; demo-only completion of the trip or the simulated payment |
+| `POST /api/hub/bookings/{id}/decision` | Approve, decline or ask (caretaker session with `approve`) |
+| `GET /api/hub/activities` | Timeline events this session may see |
+| `GET /api/hub/care-circle/activities` | Caretaker session only: permitted events and bookings |
+| `POST /api/hub/demo/reset` | Demo only: `{"scenario": "fresh" or "meera", "confirm": true}` |
+| `POST /api/hub/demo/fail-next` | Demo only: the next booking fails |
+
+Where this differs from the written plan, it was adapted to the existing app:
+
+- Routes sit under `/api/hub`, the session cookie's path; `/api/demo` already belongs to the older food demo.
+- Places, quotes, bookings and events are lists inside the one account document instead of sub-collections, so each change stays a single transaction.
+- Adapters run inside that transaction because they do no I/O.
+- The plan's `DRAFT` and `QUOTED` stages are the request and quote records rather than booking statuses. `COMPLETED_SIMULATED`, `DECLINED` and a cancelled approval were added.
+- Accounts saved by older versions of this prototype are reset to an empty setup.
+
 ## Care Circle Dashboard
 
 The older adult stays in control. Trusted people ("caretakers") join a Care Circle by invitation and see only what the older adult chose to share. Every permission is checked by the backend inside the same transaction as the change, so hiding a button is never the only protection, and removing someone takes effect on their very next request. All providers, bookings and payments are simulated: nothing is dispatched, ordered or charged.
@@ -123,40 +176,57 @@ Booking status (waiting for approval, booked, completed, failed, cancelled, decl
 
 ### Seed or reset the demo data
 
-Demo controls are on automatically when `SAATHI_ENVIRONMENT` is `local` or `test`. Anywhere else they are off unless `SAATHI_DEMO_CONTROLS=1` is set, and the API answers 404.
+Demo controls are on automatically when `SAATHI_ENVIRONMENT` is `local` or `test`. Anywhere else they are off unless `SAATHI_DEMO_CONTROLS=1` is set, and the demo API answers 404.
 
-- **Seed**: Profile → Demo controls → **Load Meera's demo** → confirm. This replaces this browser's demo data with Meera: a check-up with Dr Mehta tomorrow at 10:30 (India time), an eye check-up, reminders (one missed, one done), a medicine reorder waiting for approval, a completed meal, a suspected scam message, trusted contacts, and two pending invitations: **Asha** (Approver, plus summaries, alerts, medicine details and reminders) and **Ravi** (Viewer). The two invitation links are shown on screen. API: `POST /api/hub/demo/seed` with an owner session.
-- **Switch account**: after loading the demo, the profile page shows **Switch account** at the top: Meera's Profile tab, or a caretaker's **Care Circle & settings** (tap the round initial in the top bar). Tap **Meera** (the older adult, with the mic), **Asha** (Approver) or **Ravi** (Viewer) to use the app as that person in the same browser; it opens their home screen. Switching to a caretaker who has not joined yet joins them; their invitation link still works on another device. It only appears in the browser that loaded the demo, never for a caretaker who joined by link, and not at all where demo controls are off. API: `POST /api/hub/demo/switch` with `{"to": "owner"}` or a Care Circle id.
-- **Force a failure**: Profile → Demo controls → **Make the next booking fail**.
-- **Mark a booking completed**: open a booked item in Activity → **Demo: mark completed**. This sets the payment to paid (simulated).
-- **Reset**: About → **Reset demo data** clears this browser's demo, including everyone's Care Circle access.
+- **Reset**: Profile → Demo controls → **Start fresh at setup** or **Load Meera's demo**. Both first ask "Replace everything in this demo?" with focus on **Keep my data**, so pressing Enter twice cannot wipe a demo. API: `POST /api/hub/demo/reset` with `{"scenario": "fresh", "confirm": true}` (or `"meera"`). Without `"confirm": true` it is refused (422), and caretakers are refused (403).
+  - **Fresh**: an empty profile that opens setup. Demo references start again at 1042. Use this for the scripted demo.
+  - **Meera**: Meera's finished setup: Home, Doctor and Eye care (sample addresses), all three demo providers connected, the demo wallet, approvals above ₹100 and for every pharmacy order, a check-up with Dr Mehta tomorrow at 10:30 (India time) and an eye check-up, reminders (one missed, one done), a completed meal (DEMO-FOOD-1042), a pharmacy order (sample ORS and calcium) waiting for approval, a suspected scam message, trusted contacts, and two pending invitations: **Asha** (Approver, plus summaries, alerts, medicine details and reminders) and **Ravi** (Viewer). The two invitation links are shown on screen.
+- **Switch account**: after a demo reset, the profile page shows **Switch account** at the top: Meera's Profile tab, or a caretaker's **Care Circle & settings** (tap the round initial in the top bar). Tap a name to use the app as that person in the same browser; it opens their home screen. Switching to a caretaker who has not joined yet joins them; their invitation link still works on another device. It only appears in the browser that reset the demo, never for a caretaker who joined by link, and not at all where demo controls are off. API: `POST /api/hub/demo/switch` with `{"to": "owner"}` or a Care Circle id.
+- **Force a failure**: Profile → Demo controls → **Make the next booking fail**. Only the next confirmation fails.
+- **Complete a booking**: open a booked item in Activity → **Demo: mark trip or delivery completed**, or, for pay on completion, **Demo: mark simulated payment complete**.
+- **Delete my data**: About → **Delete my data** clears this browser's data, including everyone's Care Circle access. This is a privacy action, not a demo control, so it is available everywhere.
 
 All seeded addresses, phone numbers and medicines are labelled as samples.
 
 ### Run the full hackathon demo
 
-Start the backend and frontend (see [Run locally](#run-locally)). The simplest way is one browser window: after step 1, use **Switch account** on the profile page to move between Meera, Asha and Ravi. To show two people side by side instead, use **http://127.0.0.1:5173** for Meera and open the caretaker links on **http://localhost:5173** or in a private window. Cookies are per site name, and both names reach the same servers.
+Start the backend and frontend (see [Run locally](#run-locally)) and open http://127.0.0.1:5173. One browser window is enough: use **Switch account** on the profile page to move between people. To show two people side by side instead, open a caretaker's invitation link on **http://localhost:5173** or in a private window. Cookies are per site name, and both names reach the same servers.
 
-1. **Meera**: open http://127.0.0.1:5173/#/profile → Load Meera's demo → confirm.
-2. **Asha**: on Meera's Profile, tap **Asha** under Switch account (or open Asha's link on `localhost` or in a private window → Join as caretaker). The Overview shows a medicine request waiting for approval, a suspected scam alert, a missed reminder and tomorrow's check-up.
-3. **Ravi**: tap Asha's initial in the top bar → tap **Ravi** (or open his link in another private window → Join). He sees shared activity only: no medicine names, payments, conversations, alerts or approval buttons.
-4. **Care coordination**: as Meera, type or say "Please take me to my doctor's appointment". Saathi uses the saved appointment for the destination. Choose **Ola Mini (₹165)** → **Book with Ola**. It is above Meera's ₹150 limit, so it shows **Sent for approval**, payment **Not charged (simulated)**.
-5. **Delegated approval**: as Asha, Approvals → see why approval is needed → **Approve**. Within seconds Meera's Activity shows **Booked · simulated** and **Pay on completion (simulated) · nothing charged yet**. The details show "Approved by Asha", the appointment, the timeline, and a summary that separates **Confirmed** from **Suggestions (not done)**.
-6. **Permissions hold on the server**: Ravi's Approvals tab says he has no access. Calling the approval API directly as Ravi returns 403 (the end-to-end script checks this).
-7. **Failure path**: as Meera, Make the next booking fail → book any ride. It shows **Booking failed**, nothing booked or charged, with Try again. Asha gets a confirmed alert in Safety, and Ravi's Activity shows it as failed, not completed.
-8. **Revocation**: as Meera, Family → Ravi → **Remove**. Ravi's next refresh says "Your Care Circle access was removed."
+**Part 1: the scripted demo**
 
-`scripts/e2e-local.cjs` runs these steps in three browser contexts, using Playwright with Edge or Chrome.
+1. **Fresh start**: Profile → Demo controls → **Start fresh at setup** → **Yes, reset the demo**. Setup opens.
+2. **Set up as Meera**: name **Meera** → Continue; comfort settings → Continue; **Use sample: Home** → Save place, then **Use sample: Doctor** → Save place (Home is the usual pickup) → Continue; add **Ravi** with "See my shared activity (view only)" → **Add to my Care Circle** → Continue; **Connect Demo Ride Provider** → Continue; **Demo wallet (simulated)** → Continue; check the review → **Yes, finish setup**.
+3. **Ride to the doctor**: **Try a demo ride** → Where to? **Doctor** → **Get demo prices**: Rapido Auto ₹83, Ola Mini ₹125, Uber Go ₹135. Choose **Rapido Auto** to see the fare line by line and "Demo ride — no real driver will arrive."
+4. **Confirm**: **Confirm demo booking**. The receipt shows **DEMO-RIDE-1042**, Booking **Booked · simulated**, Payment **Paid (simulated) · no money charged** and "No money charged." **Demo details** shows `CONFIRMED_SIMULATED` and `SUCCEEDED_SIMULATED`.
+5. **Same event, two views**: Activity → **Timeline** shows "Booked (simulated): Rapido Auto to Doctor". Then Profile → Switch account → **Ravi**: his Activity timeline shows the same event, and the booking shows Home → Doctor without addresses or payment.
+6. **Forbidden action**: as Ravi, open the ride → **Demo: test the permission check** → **Try to cancel this booking**: "Refused by the server: Only the account owner can perform this action." **Try to approve this booking** is refused as well. Both are real API calls.
+7. **Forced failure**: Switch account → **Meera** → Profile → **Make the next booking fail**, then book the same ride. **Booking failed**: Booking "Failed · nothing booked", Payment "Not charged (simulated)". The first ride is still booked.
+
+**Part 2: approvals, with Meera's seeded demo**
+
+1. Profile → Demo controls → **Load Meera's demo** → **Yes, reset the demo**.
+2. **Asha**: tap **Asha** under Switch account (or open her link elsewhere → Join as caretaker). The Overview shows the pharmacy order waiting for approval, a suspected scam alert, a missed reminder and tomorrow's check-up. Switch back to **Meera**.
+3. **Care coordination**: on Home, type or say "Please take me to my doctor's appointment". Saathi uses the saved appointment. Choose **Ola Mini (₹125)**: it is above Meera's ₹100 limit, so the check step says an approver must agree. **Confirm demo booking** → **Sent for approval**, payment **Not charged (simulated)**.
+4. **Delegated approval**: as Asha, Approvals → **Approve**. Meera's Activity then shows **Booked · simulated** and, separately, **Paid (simulated) · no money charged**.
+5. **Ravi** (Viewer) sees shared rides and "a pharmacy order", but no medicine names, payments, conversations or approval buttons.
+6. **Revocation**: as Meera, Family → Ravi → **Remove**. If Ravi joined by link in another window, his next refresh says "Your Care Circle access was removed." In one window, he disappears from Switch account.
+
+`scripts/e2e-local.cjs` runs both parts in separate phone-sized browser contexts with Playwright (Edge by default; set `SAATHI_BROWSER_CHANNEL=chrome` for Chrome). `backend/tests/test_scripted_demo.py` runs part 1 against the API on every `pytest` run.
 
 ### Tests for this feature
 
-- Backend: `backend/tests/test_care_circle.py` (roles, sensitive permissions, sharing, separate payment status, forced failure, one decision per request, revocation, invitations, administrator limits) and `backend/tests/test_care_plans.py` (appointments, reminders, coordination, summaries, transcripts, scam, repeated trouble, help, contacts, address, seed, demo person switching, production demo-control lock).
-- Frontend: `frontend/src/CareCircle.test.tsx` (owner Care Circle screens, the caretaker dashboard and Switch account).
+- Backend:
+  - `test_domain.py` (types and statuses), `test_providers.py` (deterministic demo providers, idempotency, failure), `test_onboarding.py` (steps, resume, validation, review, connections, payment choice).
+  - `test_quotes.py` (server prices, expiry, ownership, refused alterations) and `test_bookings.py` (confirmation, double taps and retries, approvals, separate payment status, failure, cancellation, completion).
+  - `test_activities.py` (one event record for the owner and caretakers; 16 direct API calls a view-only caretaker must be refused; revocation on the next request).
+  - `test_scripted_demo.py` (the confirmed demo reset and the whole scripted demo through the API).
+  - `test_care_circle.py` and `test_care_plans.py` (roles, sensitive permissions, sharing, appointments, reminders, coordination, summaries, scam, help, contacts, demo person switching, production demo-control lock).
+- Frontend: `Onboarding.test.tsx` (setup wizard), `App.test.tsx` (request, check and confirm, receipt, services, activity) and `CareCircle.test.tsx` (owner Care Circle screens, the caretaker dashboard, the shared timeline, the permission check, demo controls and Switch account).
 - Run them with the normal [Checks](#checks).
 
 ### Implemented and not yet implemented
 
-Implemented: shared activity timeline with filters and details; role-based access with explicit sensitive permissions, enforced by the backend; multiple caretakers; per-service and per-booking sharing; appointments and reminders, with missed reminders flagged for follow-up and never treated as proof a medicine was taken; approvals with "ask a question"; the safety centre (failed bookings, suspected scams, emergency mentions, repeated trouble, help requests); conversation summaries with confirmed actions taken only from stored records; optional Gemini-written summaries (owner or summary holders, when a key is set); care coordination from a saved appointment; audit of who did what; seed, reset, forced failure and simulated completion.
+Implemented: guided setup with server-checked steps, resume and review; saved places with one usual pickup; three deterministic demo providers with connect, disconnect and reset; server-priced quotes for rides, meals and sample pharmacy items, with expiry; explicit confirmation; idempotent booking; approvals; separate simulated payment status (demo wallet or pay on completion), cancellation with a simulated refund, and demo completion; one activity timeline for the owner and caretakers; shared activity with filters and details; role-based access with explicit sensitive permissions, enforced by the backend; multiple caretakers; per-service and per-booking sharing; appointments and reminders, with missed reminders flagged for follow-up and never treated as proof a medicine was taken; approvals with "ask a question"; the safety centre (failed bookings, suspected scams, emergency mentions, repeated trouble, help requests); conversation summaries with confirmed actions taken only from stored records; optional Gemini-written summaries (owner or summary holders, when a key is set); care coordination from a saved appointment; audit of who did what; a confirmed demo reset (fresh or Meera), forced failure and simulated completion.
 
 Not implemented, or different from the plan:
 
@@ -167,7 +237,10 @@ Not implemented, or different from the plan:
 - **Scam detection** is word matching, labelled as a suspicion; there is no AI classifier.
 - **Multiple caretakers**: there are no primary or backup contacts and no appointment responsibilities. Editing an appointment exists in the API (`PUT /api/hub/appointments/{id}`), but the UI only adds and removes.
 - **Gemini summaries** have not been tried with a real key; tests fake the Gemini responses.
-- **End-to-end script**: `scripts/e2e-local.cjs` has not been run here, because this laptop's managed browsers block automation. The flow was checked by hand in a real browser with two sessions.
+- **Real providers and payments** are out of scope by design: no provider accounts, no payment gateway, no stored payment details. The familiar app names are labels only.
+- **Prescription medicines** are not represented; the demo pharmacy has sample non-prescription items only.
+- **Places** are typed text with sample addresses; there are no maps, geocoding or live distances. Ride distances are worked out from the place names so that prices stay the same every time.
+- **End-to-end script**: `scripts/e2e-local.cjs` could not be run on this laptop, because its managed browsers block automation. The same steps (both parts) were run with Playwright in the editor's built-in browser, and `test_scripted_demo.py` covers part 1 through the API. Layout was checked at 320 and 390 px wide, and the reset confirmation was checked with the keyboard.
 
 ## Checks
 
@@ -219,12 +292,12 @@ This starts the image in the `production` environment on an injected `PORT`, the
 
 ## Layout
 
-- `frontend/`: React app, mobile first. `src/screens/` holds the older adult's screens (Home, the request flow, Activity and details, Apps, Care Circle, Profile, About, invitation); `src/care/` the caretaker dashboard; `src/components/` shared pieces (bottom navigation, activity list and details, plans, alerts, summaries, demo controls); `src/theme.css` the Google palette (contrast is enforced by `src/theme.test.ts`); `public/` the manifest, icons and service worker.
-- `backend/`: configuration, health/version/readiness API, prototype routes (`app/hub.py`, `app/demo.py`), Care Circle rules and caretaker views (`app/care.py`), the demo seed (`app/seed.py`), request routing (`app/intent.py`), Gemini calls (`app/assistant.py`), the simulated provider apps (`app/providers.py`), tests, Dockerfile, pinned dependency snapshots.
+- `frontend/`: React app, mobile first. `src/onboarding/` holds the setup wizard; `src/screens/` the older adult's screens (Home, the request flow, Activity and details, Services, Care Circle, Profile, About, invitation); `src/care/` the caretaker dashboard; `src/components/` shared pieces (bottom navigation, activity list, details and timeline, places editor, service connection cards, price lines, plans, alerts, summaries, demo controls); `src/theme.css` the Google palette (contrast is enforced by `src/theme.test.ts`); `public/` the manifest, icons and service worker.
+- `backend/`: configuration, health/version/readiness API, prototype routes (`app/hub.py`, `app/demo.py`), domain types (`app/domain.py`), setup (`app/onboarding.py`), quotes, bookings and simulated payments (`app/bookings.py`), the demo providers (`app/providers.py`), Care Circle rules and caretaker views (`app/care.py`), the demo seed (`app/seed.py`), request routing (`app/intent.py`), Gemini calls (`app/assistant.py`), tests, Dockerfile, pinned dependency snapshots.
 - `infrastructure/`: deny-all Firestore rules until Phase 2 authentication.
 - `firebase.json`: static Hosting plus `/api/**` forwarding to Cloud Run.
 - `.gitlab-ci.yml`: lint, tests, package builds, container build and run check; no automatic deployment.
-- `scripts/`: `smoke.mjs` (API and browser smoke test), `container-smoke.sh` (container check), `make-icons.sh` (regenerates the app icons on macOS), `firestore-local.ps1` (Windows emulator launcher), `e2e-local.cjs` (the scripted Care Circle demo, end to end, on a phone-sized screen).
+- `scripts/`: `smoke.mjs` (API and browser smoke test), `container-smoke.sh` (container check), `make-icons.sh` (regenerates the app icons on macOS), `firestore-local.ps1` (Windows emulator launcher), `e2e-local.cjs` (the scripted hackathon demo, end to end, on a phone-sized screen).
 - `docs/phase-1.md`: acceptance status, evidence and remaining work.
 - `docs/deployment.md`: proposed deployment steps for a separately approved cloud task.
 - `docs/firestore.md`, `docs/local-demo.md`: Firestore emulator setup and the local prototype.
@@ -235,7 +308,7 @@ This starts the image in the `production` environment on an injected `PORT`, the
 `SAATHI_VERSION`: 0.1.0 by default.
 `PORT`: Cloud Run container port, default 8080 in Docker.
 Firestore variables (`SAATHI_FIRESTORE_MODE`, `SAATHI_FIRESTORE_PROJECT`, `FIRESTORE_EMULATOR_HOST`) are described in `docs/firestore.md`.
-Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`, `SAATHI_DEMO_CONTROLS` (`1` enables seed, forced failure and simulated completion outside `local`/`test`; leave it unset in production).
+Prototype-only variables, not part of Phase 1 acceptance: `SAATHI_GEMINI_API_KEY`, `SAATHI_GEMINI_MODEL`, `SAATHI_SESSION_SECRET` (32+ characters; required when the prototype routes run outside `local` and `test`), `SAATHI_ALLOWED_ORIGINS`, `SAATHI_LOCAL_DB`, `SAATHI_DEMO_CONTROLS` (`1` enables the demo reset, forced failure, demo completion, Switch account and the caretaker permission check outside `local`/`test`; leave it unset in production).
 
 Do not commit credentials or service-account keys. No credentials are required for local Phase 1. Firebase Hosting and the API share an origin; permissive CORS is unnecessary.
 

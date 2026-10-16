@@ -152,16 +152,34 @@ test('upcoming plans flag missed reminders without claiming a medicine was taken
 
 test('demo controls load Meera with caretaker links and arm a failure, only when enabled', async () => {
   const seeded = makeState({ profile: { ...makeState().profile, name: 'Meera' }, demo_controls: true })
-  const calls = stubApi({ 'POST /demo/seed': () => ({ state: seeded, invites: [{ name: 'Asha', role: 'approver', code: 'c1.s' }, { name: 'Ravi', role: 'viewer', code: 'c2.s' }] }), 'POST /demo/fail-next': () => ({ fail_next: true }) }, makeState({ demo_controls: true }))
+  const calls = stubApi({ 'POST /demo/reset': () => ({ scenario: 'meera', state: seeded, invites: [{ name: 'Asha', role: 'approver', code: 'c1.s' }, { name: 'Ravi', role: 'viewer', code: 'c2.s' }] }), 'POST /demo/fail-next': () => ({ fail_next: true }) }, makeState({ demo_controls: true }))
   window.location.hash = '#/profile'
   render(<App />)
-  await userEvent.click(await screen.findByRole('button', { name: /Load Meera's demo/ }))
-  expect(calls.some((call) => call.url.endsWith('/demo/seed'))).toBe(false)
-  await userEvent.click(screen.getByRole('button', { name: 'Yes, replace my demo data' }))
+  await userEvent.click(await screen.findByRole('button', { name: "Load Meera's demo" }))
+  expect(calls.some((call) => call.url.endsWith('/demo/reset'))).toBe(false)
+  expect(screen.getByRole('button', { name: 'Keep my data' })).toHaveFocus()
+  await userEvent.click(screen.getByRole('button', { name: 'Yes, reset the demo' }))
   expect(await screen.findByDisplayValue(/#\/join\/c1\.s$/)).toBeInTheDocument()
   expect(screen.getByDisplayValue(/#\/join\/c2\.s$/)).toBeInTheDocument()
+  expect(calls.find((call) => call.url.endsWith('/demo/reset'))?.body).toEqual({ scenario: 'meera', confirm: true })
   await userEvent.click(screen.getByRole('button', { name: 'Make the next booking fail' }))
   expect(calls.some((call) => call.url.endsWith('/demo/fail-next'))).toBe(true)
+})
+
+test('a fresh demo reset asks first, then opens setup', async () => {
+  const fresh = makeState({ demo_controls: true, onboarding: { ...makeState().onboarding!, completed: false, started_at: null, current: 'welcome' } })
+  const calls = stubApi({ 'POST /demo/reset': () => ({ scenario: 'fresh', state: fresh, invites: [] }) }, makeState({ demo_controls: true }))
+  window.location.hash = '#/profile'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Start fresh at setup' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Keep my data' }))
+  expect(calls.some((call) => call.url.endsWith('/demo/reset'))).toBe(false)
+  expect(screen.getByRole('button', { name: 'Start fresh at setup' })).toHaveFocus()
+  await userEvent.click(screen.getByRole('button', { name: 'Start fresh at setup' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Yes, reset the demo' }))
+  expect(await screen.findByText('Demo reset. Setup starts now.')).toBeInTheDocument()
+  expect(window.location.hash).toBe('#/onboarding')
+  expect(calls.find((call) => call.url.endsWith('/demo/reset'))?.body).toEqual({ scenario: 'fresh', confirm: true })
 })
 
 test('without demo controls the profile has no seed or failure buttons', async () => {
@@ -170,6 +188,7 @@ test('without demo controls the profile has no seed or failure buttons', async (
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Your profile' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /Load Meera's demo/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start fresh at setup' })).not.toBeInTheDocument()
   expect(screen.queryByRole('region', { name: 'Switch account' })).not.toBeInTheDocument()
 })
 

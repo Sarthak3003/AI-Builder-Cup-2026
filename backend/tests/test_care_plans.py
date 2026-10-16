@@ -12,6 +12,8 @@ from app.config import Settings
 from app.hub_store import HubStore
 from app.main import create_app
 
+MEERA = {"scenario": "meera", "confirm": True}
+
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
@@ -290,7 +292,7 @@ def test_trusted_contacts_need_their_own_permission(app, owner):
 
 
 def test_demo_seed_loads_meera_with_invites_that_work(app, owner):
-    seeded = owner.post("/api/hub/demo/seed").json()
+    seeded = owner.post("/api/hub/demo/reset", json=MEERA).json()
     meera = seeded["state"]
     assert meera["profile"]["name"] == "Meera"
     assert [a["title"] for a in meera["appointments"]][0] == "Check-up with Dr Mehta"
@@ -317,7 +319,7 @@ def test_demo_seed_loads_meera_with_invites_that_work(app, owner):
 
 
 def test_demo_switcher_plays_each_person_in_the_demo_this_browser_loaded(app, owner):
-    seeded = owner.post("/api/hub/demo/seed").json()
+    seeded = owner.post("/api/hub/demo/reset", json=MEERA).json()
     meera = seeded["state"]
     people = {person["name"]: person["id"] for person in meera["demo_people"]}
     assert meera["demo_person"] == "owner" and set(people) == {"Meera", "Asha", "Ravi"}
@@ -372,6 +374,6 @@ def test_demo_controls_are_off_in_production_unless_opted_in(tmp_path, monkeypat
         api.post("/api/hub/session")
         assert state(api)["demo_controls"] is enabled
         expected = 200 if enabled else 404
-        assert api.post("/api/hub/demo/seed").status_code == expected
+        assert api.post("/api/hub/demo/reset", json=MEERA).status_code == expected
         assert api.post("/api/hub/demo/fail-next").status_code == expected
         assert api.post("/api/hub/demo/switch", json={"to": "owner"}).status_code == expected
