@@ -415,7 +415,7 @@ test('turning an option off saves the choice, and the page is honest that these 
   render(<App />)
   expect(await screen.findByText(/not\s+connected to those companies/)).toBeInTheDocument()
   expect(screen.getAllByText('Simulated provider — no real order or dispatch.')).toHaveLength(3)
-  const uber = await screen.findByRole('switch', { name: 'Use Uber' })
+  const uber = await screen.findByRole('switch', { name: 'Show Uber example option' })
   expect(uber).toBeChecked()
   await userEvent.click(uber)
   const save = calls.find((call) => call.method === 'PUT' && call.url.endsWith('/profile'))
@@ -423,7 +423,7 @@ test('turning an option off saves the choice, and the page is honest that these 
   const sent = (save!.body as { enabled_providers: string[] }).enabled_providers
   expect(sent).not.toContain('uber')
   expect(sent).toEqual(['ola', 'rapido', 'ubereats', 'swiggy', 'zomato'])
-  await waitFor(() => expect(screen.getByRole('switch', { name: 'Use Uber' })).not.toBeChecked())
+  await waitFor(() => expect(screen.getByRole('switch', { name: 'Show Uber example option' })).not.toBeChecked())
 })
 
 test('a caretaker gets the Care Circle dashboard, never the request screens', async () => {

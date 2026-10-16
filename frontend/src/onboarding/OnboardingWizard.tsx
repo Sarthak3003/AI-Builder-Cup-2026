@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { api, paymentMethodLabel } from '../hub'
 import type { Channel, HubState, PaymentMethod, StepId } from '../hub'
 import { setupSteps } from '../route'
-import ServiceConnectionCard from '../components/ServiceConnectionCard'
+import ServiceOptions from '../components/ServiceOptions'
 import PlacesEditor from '../components/PlacesEditor'
 import BookingPreference from '../components/BookingPreference'
 import type { Hub } from '../screens/hubType'
@@ -188,8 +188,8 @@ function ServicesStep({ hub, nav }: StepProps) {
   const services = hub.state.services ?? []
   return (
     <>
-      <p className="lead">Choose which demo providers Saathi may use. Each one is simulated: no real order or dispatch.</p>
-      {services.map((service) => <ServiceConnectionCard key={service.service_type} hub={hub} service={service} />)}
+      <p className="lead">Connect a demo provider for the complete flow. Uber, Ola and other familiar names are example options only. No real order, dispatch or payment takes place.</p>
+      {services.map((service) => <ServiceOptions key={service.service_type} hub={hub} service={service} />)}
       <p className="muted">You can skip this and connect them later in Services.</p>
       <Actions hub={hub} nav={nav} step="services" onContinue={save} exitSave={save} skippable={!services.some((s) => s.status === 'CONNECTED')} />
     </>
