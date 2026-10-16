@@ -48,13 +48,15 @@ type Offer = {
 export type Quote = Offer & {
   id: string; request_id: string; payment_method: PaymentMethod; approval: { required: boolean; reason: string }; channel: string;
   appointment_id: string | null; status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED'; created_at: number; expires_at: number;
-  recommended?: { reason: string; by: 'rules' | 'gemini' } | null;
+  recommended?: Pick | null;
 }
-export type QuoteResult = { request_id: string; service_type: ServiceType; quotes: Quote[] }
+// Why Saathi chose one ride: its own price-and-wait rule, or Gemini when a key is set.
+export type Pick = { reason: string; by: 'rules' | 'gemini' }
+export type QuoteResult = { request_id: string; service_type: ServiceType; quotes: Quote[]; booking?: Activity }
 export type AskResult = {
   id: string; service: Service | null; channel: string; status: 'quoted' | 'needs_details'; summary: string; clarification: string;
   request_id: string | null; quotes: Quote[]; appointment_id: string | null; input?: { message?: string; destination?: string };
-  understood_by: 'keywords' | 'gemini' | 'appointment'; transcript?: string;
+  understood_by: 'keywords' | 'gemini' | 'appointment'; transcript?: string; booking?: Activity;
 }
 export type Payment = { method: PaymentMethod; status: PaymentStatus; amount_minor: number; currency: string; simulated: boolean; updated_at?: number; refund?: { status: string; at: number } | null }
 export type Decision = { action: 'approve' | 'reject'; by: string; name: string; note: string; at: number }
@@ -63,7 +65,8 @@ export type Trip = { vehicle: string; plate: string; pin: string }
 export type Activity = Offer & {
   id: string; request_id?: string; quote_id?: string; channel: string; booking_status: BookingStatus; provider_booking_id: string | null;
   payment?: Payment; shared?: boolean; approval_reason?: string; appointment_id?: string | null; decision?: Decision | null;
-  questions?: { by: string; text: string; at: number }[]; failure?: string; trip?: Trip | null; created_at: number; updated_at?: number;
+  questions?: { by: string; text: string; at: number }[]; failure?: string; trip?: Trip | null; chosen_by?: Pick | null;
+  created_at: number; updated_at?: number;
 }
 export type Role = 'viewer' | 'assistant' | 'approver' | 'administrator'
 export type Grant = {
@@ -122,6 +125,11 @@ export const paymentLabel: Record<PaymentStatus, string> = {
   FAILED_SIMULATED: 'Failed (simulated) · nothing charged',
 }
 export const live = (item: Activity) => item.booking_status === 'AWAITING_APPROVAL' || item.booking_status === 'CONFIRMED_SIMULATED'
+export const bookedNotice = (booking: Activity) => (
+  booking.booking_status === 'AWAITING_APPROVAL' ? 'Sent for approval. Nothing is booked or charged yet.'
+    : booking.booking_status === 'FAILED' ? 'The booking failed. Nothing was booked or charged.'
+      : `Demo booking confirmed: ${booking.provider_booking_id}. No real driver will come and no money moves.`
+)
 export const roleLabel: Record<Role, string> = { viewer: 'Viewer', assistant: 'Assistant', approver: 'Approver', administrator: 'Administrator' }
 export const roleBlurb: Record<Role, string> = {
   viewer: 'Sees shared rides, orders and appointments.',

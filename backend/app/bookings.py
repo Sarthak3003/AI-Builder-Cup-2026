@@ -51,6 +51,10 @@ class QuoteIn(BaseModel):
     appointment_id: str | None = Field(default=None, max_length=40)
     option_id: str | None = Field(default=None, max_length=40)
     items: list[ItemRequest] = Field(default_factory=list, max_length=MAX_LINES)
+    # Lets a retried 'book the best ride for me' request return the same booking.
+    idempotency_key: str | None = Field(
+        default=None, min_length=8, max_length=80, pattern=r"^[A-Za-z0-9-]+$"
+    )
 
 
 def _place(state: dict, place_id: str) -> dict:

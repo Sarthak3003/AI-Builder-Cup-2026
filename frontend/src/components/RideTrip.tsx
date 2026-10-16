@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { formatINR, formatWhen, paymentMethodLabel } from '../hub'
 import type { Activity, Appointment, PlaceSnapshot, Trip } from '../hub'
 import { CarIcon, PhoneIcon } from '../icons'
+import PickNote from './PickNote'
 import PriceLines from './PriceLines'
 import ProviderBadge from './ProviderBadge'
 import StatusChips from './StatusChips'
@@ -125,6 +126,7 @@ export default function RideTrip({ item, appointment, actions, headerAction }: P
           <h2 id="ride-status-title">{head.title}</h2>
           <p className="muted">{head.detail}</p>
           <StatusChips item={item} />
+          {item.chosen_by ? <PickNote pick={item.chosen_by} title="Booked for you by Saathi" /> : null}
         </div>
         {stage === 'coming' && item.trip ? <PinRow pin={item.trip.pin} /> : null}
       </section>

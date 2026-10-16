@@ -134,7 +134,7 @@ class Profile(BaseModel):
     read_aloud: bool = False
     offer_help: bool = True
     payment_method: PaymentMethod | None = None
-    # False: Saathi picks one ride and the owner confirms it, instead of comparing a list.
+    # False is the owner's standing choice: Saathi picks the best ride and books it straight away.
     show_ride_options: bool = True
 
     @field_validator("enabled_providers")
@@ -596,7 +596,28 @@ def hub_router(config: Settings):
             record(state, "quoted", result["request_id"])
             return result
 
-        return ai_pick(who, mutate(who, save, owner_only=True))
+        return book_pick(
+            who, ai_pick(who, mutate(who, save, owner_only=True)), body.idempotency_key
+        )
+
+    def book_pick(who, result, key):
+        """Book Saathi's pick when the owner chose 'Let Saathi choose the best ride and book it'."""
+        pick = next((q for q in result["quotes"] if q.get("recommended")), None)
+        if not pick or not key:
+            return result
+
+        def save(state):
+            earlier = next((b for b in state["activity"] if b.get("idempotency_key") == key), None)
+            if earlier:
+                return earlier
+            confirmed = ConfirmIn(idempotency_key=key, confirmed=True)
+            booking, _ = confirm_quote(state, pick["id"], confirmed, apps(state))
+            booking["chosen_by"] = pick["recommended"]
+            failed = booking["booking_status"] == "FAILED"
+            record(state, "booking_failed" if failed else "auto_booked", booking["id"])
+            return booking
+
+        return {**result, "booking": mutate(who, save, owner_only=True)}
 
     def ai_pick(who, result):
         """With a Gemini key, Gemini re-weighs Saathi's pick; otherwise the rule's pick stands."""
@@ -814,7 +835,7 @@ def hub_router(config: Settings):
                 "transcript": message,
             }
 
-        return ai_pick(who, mutate(who, act, owner_only=True))
+        return book_pick(who, ai_pick(who, mutate(who, act, owner_only=True)), f"ask-{conv_id}")
 
     def next_appointment(state):
         now = time.time()

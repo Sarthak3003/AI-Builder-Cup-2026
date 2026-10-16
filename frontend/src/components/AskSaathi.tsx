@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { api, serviceNames } from '../hub'
+import { api, bookedNotice, serviceNames } from '../hub'
 import type { AskResult } from '../hub'
 import { wordsFor } from '../copy'
 import { newId } from '../id'
@@ -24,6 +24,12 @@ export default function AskSaathi({ hub, simple = false }: { hub: Hub; simple?: 
   const field = useRef<HTMLInputElement>(null)
 
   async function show(result: AskResult) {
+    if (result.booking) {
+      await refresh()
+      hub.notify(bookedNotice(result.booking))
+      window.location.hash = `#/activity/${result.booking.id}`
+      return
+    }
     if (result.service && result.quotes.length && result.request_id) {
       await refresh()
       window.location.hash = `#/request/${result.service}/${result.request_id}`

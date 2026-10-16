@@ -2,6 +2,7 @@
 
 import json
 import time
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -229,6 +230,52 @@ def test_gemini_can_reweigh_the_pick_and_the_rule_stands_if_it_cannot(owner, mon
     fake_gemini(monkeypatch, {"option_id": "helicopter", "reason": "Fastest."})
     rides = ok(quote(owner, **doctor))["quotes"]
     assert [q["option_id"] for q in rides if q.get("recommended")] == ["rapido-auto"]
+
+
+def test_saathi_books_its_pick_end_to_end_once_per_retry_key(owner, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    places = set_up(owner)
+    doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
+    asked = {**doctor, "idempotency_key": "book-best-0001"}
+    assert "booking" not in ok(quote(owner, **asked)), "the list is still shown, so no booking"
+    hide_ride_options(owner)
+    first = ok(quote(owner, **asked))["booking"]
+    assert (first["option_id"], first["provider_booking_id"]) == ("rapido-auto", "DEMO-RIDE-1042")
+    assert (first["booking_status"], first["payment"]["status"]) == (
+        "CONFIRMED_SIMULATED",
+        "SUCCEEDED_SIMULATED",
+    )
+    assert first["chosen_by"] == {
+        "reason": "Lowest price and shortest wait: ₹83, about 3 min away.",
+        "by": "rules",
+    }
+    again = ok(quote(owner, **asked))["booking"]
+    assert again["id"] == first["id"], "a retried request returns the same booking"
+    after = ok(owner.get("/api/hub/state"))
+    assert len(after["activity"]) == 1
+    assert "auto_booked" in [entry["event"] for entry in after["audit"]]
+    assert "booking" not in ok(quote(owner, **doctor)), "no retry key, so nothing is booked"
+
+
+def test_asking_saathi_books_the_ride_and_a_forced_failure_books_nothing(owner, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    set_up(owner)
+    hide_ride_options(owner)
+    ask = {"id": "11111111-1111-4111-8111-111111111111", "message": "Take me to my doctor"}
+    reply = ok(owner.post("/api/hub/ask", json=ask))
+    assert reply["booking"]["title"] == "Rapido Auto to Doctor"
+    assert reply["booking"]["booking_status"] == "CONFIRMED_SIMULATED"
+    assert ok(owner.post("/api/hub/ask", json=ask))["booking"]["id"] == reply["booking"]["id"]
+    ok(owner.post("/api/hub/demo/fail-next"))
+    failed = ok(owner.post("/api/hub/ask", json={**ask, "id": str(uuid4())}))["booking"]
+    assert (failed["booking_status"], failed["payment"]["status"]) == (
+        "FAILED",
+        "NOT_CHARGED_SIMULATED",
+    )
+    assert [b["booking_status"] for b in ok(owner.get("/api/hub/state"))["activity"]] == [
+        "FAILED",
+        "CONFIRMED_SIMULATED",
+    ]
 
 
 def test_expired_quotes_drop_out_of_the_active_list(owner, monkeypatch):

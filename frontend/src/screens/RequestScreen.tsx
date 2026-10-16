@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api, bookingStatusLabel, formatINR, formatWhen, paymentLabel, paymentMethodLabel, serviceNames, serviceTypeOf } from '../hub'
+import { api, bookedNotice, bookingStatusLabel, formatINR, formatWhen, paymentLabel, paymentMethodLabel, serviceNames, serviceTypeOf } from '../hub'
 import type { Activity, HubState, MenuItem, Quote, QuoteResult, Service } from '../hub'
 import { newId } from '../id'
 import { BackIcon, CheckIcon } from '../icons'
+import PickNote from '../components/PickNote'
 import PriceLines from '../components/PriceLines'
 import ProviderBadge from '../components/ProviderBadge'
 import type { Hub } from './hubType'
@@ -65,6 +66,8 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [now] = useState(() => Date.now() / 1000)
   const keys = useRef<Record<string, string>>({})
+  // Kept until Saathi's booking arrives, so retrying after a lost reply cannot book twice.
+  const autoKey = useRef<string | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const firstRender = useRef(true)
 
@@ -94,14 +97,21 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
     event.preventDefault()
     const items = Object.entries(counts).filter(([, quantity]) => quantity > 0).map(([item_id, quantity]) => ({ item_id, quantity }))
     const body = service === 'ride'
-      ? { service_type: 'RIDE', pickup_place_id: pickupId || null, ...(destinationId === 'other' ? { destination_text: destinationText } : { destination_place_id: destinationId }) }
+      ? { service_type: 'RIDE', pickup_place_id: pickupId || null, ...(destinationId === 'other' ? { destination_text: destinationText } : { destination_place_id: destinationId }), ...(autoPick ? { idempotency_key: (autoKey.current ??= newId()) } : {}) }
       : service === 'food' ? { service_type: 'FOOD', option_id: kitchenId, items } : { service_type: 'PHARMACY', items }
     void run(async () => {
       const result = await api<QuoteResult>('/quotes', 'POST', body)
+      if (result.booking) { autoKey.current = null; await openRide(result.booking); return }
       setQuotes(result.quotes)
       setSelected(firstPick(result.quotes))
       await refresh()
     })
+  }
+
+  async function openRide(booking: Activity) {
+    await refresh()
+    hub.notify(bookedNotice(booking))
+    window.location.hash = `#/activity/${booking.id}`
   }
 
   function confirm() {
@@ -110,12 +120,9 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
     const key = (keys.current[selected.id] ??= newId())
     void run(async () => {
       const booked = await api<Activity>(`/quotes/${selected.id}/confirm`, 'POST', { idempotency_key: key, confirmed: true })
+      if (autoPick && booked.booking_status !== 'FAILED') { await openRide(booked); return }
       await refresh()
-      if (!autoPick || booked.booking_status === 'FAILED') { setReceipt(booked); return }
-      hub.notify(booked.booking_status === 'AWAITING_APPROVAL'
-        ? 'Sent for approval. Nothing is booked or charged yet.'
-        : `Demo booking confirmed: ${booked.provider_booking_id}. No real driver will come and no money moves.`)
-      window.location.hash = `#/activity/${booked.id}`
+      setReceipt(booked)
     })
   }
 
@@ -144,7 +151,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
       {step === 'form' && (!provider || provider.status === 'CONNECTED') ? (
         <section className="card" aria-labelledby="form-title">
           <h2 id="form-title" tabIndex={-1} ref={heading} className={simple ? 'sr-only' : 'step-title'}>What would you like?</h2>
-          {simple ? null : <p className="muted">{autoPick ? 'Saathi will pick the ride with the best price and pickup time. You confirm it before anything is booked.' : `Prices come from the ${provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.`}</p>}
+          {simple ? null : <p className="muted">{autoPick ? 'Saathi will pick the ride with the best price and pickup time and book it for you straight away (simulated). You can cancel it on the ride page.' : `Prices come from the ${provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.`}</p>}
           {lastGroup.length ? <button type="button" className="secondary wide" onClick={() => { setQuotes(lastGroup); setSelected(firstPick(lastGroup)) }}>Continue where you left off</button> : null}
           {service === 'ride' && !places.length ? (
             <p className="clarify">Add your home in setup first, so Saathi knows where to pick you up. <a href="#/onboarding/places">Add a place</a></p>
@@ -191,7 +198,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               </>
             ) : null}
             <button className="primary wide" disabled={busy || (service !== 'ride' && !chosenItems) || (service === 'ride' && !places.length)}>
-              {service !== 'ride' ? 'Get demo price' : autoPick ? 'Find the best demo ride' : 'Get demo prices'}
+              {service !== 'ride' ? 'Get demo price' : autoPick ? 'Book the best demo ride' : 'Get demo prices'}
             </button>
           </form>
         </section>
@@ -226,12 +233,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
         <section className="review card" aria-labelledby="review-title">
           {simple ? null : <p className="eyebrow">YOU HAVE THE FINAL SAY</p>}
           <h2 id="review-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Book this?' : 'Check and confirm'}</h2>
-          {autoPick && selected.recommended ? (
-            <div className="pick-note">
-              <p><strong>Saathi&rsquo;s pick</strong> · {selected.recommended.reason}</p>
-              <p className="muted">{selected.recommended.by === 'gemini' ? 'Chosen by Gemini (AI) from the demo prices.' : 'Chosen by Saathi’s price-and-wait rule (not AI).'}</p>
-            </div>
-          ) : null}
+          {autoPick && selected.recommended ? <PickNote pick={selected.recommended} title="Saathi’s pick" /> : null}
           <ProviderBadge id={selected.app_id ?? selected.provider_type} name={selected.app_name ?? selected.provider_label} />
           <p className="review-name">{selected.title}</p>
           {selected.details?.pickup && selected.details.destination ? <p>{selected.details.pickup.label} → {selected.details.destination.label}</p> : null}

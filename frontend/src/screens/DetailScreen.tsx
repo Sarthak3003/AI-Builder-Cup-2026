@@ -23,6 +23,7 @@ export default function DetailScreen({ hub, id }: { hub: Hub; id: string }) {
       actions={
         <>
           {live(item) ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/cancel`)}>{ride ? 'Cancel ride' : 'Cancel booking'}</button> : null}
+          {ride && item.booking_status === 'FAILED' ? <a className="primary" href="#/request/ride">Try again</a> : null}
           {state.demo_controls && item.booking_status === 'CONFIRMED_SIMULATED' ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/complete`)}>Demo: mark trip or delivery completed</button> : null}
           {state.demo_controls && pending ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/payment/complete`)}>Demo: mark simulated payment complete</button> : null}
         </>

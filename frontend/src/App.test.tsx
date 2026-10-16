@@ -322,54 +322,61 @@ test('a meal is chosen from a kitchen menu and priced by the server with a demo 
   expect(screen.getByText('Demo order — no real food will be delivered.')).toBeInTheDocument()
 })
 
-test('the profile can switch off the ride options list', async () => {
+test('the profile can let Saathi choose and book rides', async () => {
   const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: body as Profile }) })
   window.location.hash = '#/profile'
   render(<App />)
-  const toggle = await screen.findByRole('checkbox', { name: 'Show me the ride options to compare' })
-  expect(toggle).toBeChecked()
-  expect(screen.getByText(/Saathi picks the ride with the best price and pickup time\. You still confirm it with one tap\./)).toBeInTheDocument()
-  await userEvent.click(toggle)
+  expect(await screen.findByRole('radio', { name: 'Show me the options and let me confirm' })).toBeChecked()
+  expect(screen.getByText(/books straight away without asking, and opens the ride page/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('radio', { name: 'Let Saathi choose the best ride and book it for me' }))
   await userEvent.click(screen.getByRole('button', { name: 'Save preferences' }))
   const saved = calls.find((call) => call.method === 'PUT' && call.url.endsWith('/profile'))?.body as Profile
   expect(saved.show_ride_options).toBe(false)
 })
 
-test('with the options list off, Saathi picks a ride, the owner confirms once and lands on the ride page', async () => {
-  const pick: Quote = { ...rapidoQuote(), recommended: { reason: 'Lowest price and shortest wait: ₹83, about 3 min away.', by: 'rules' } }
-  const booked = booking(rapidoQuote())
+const chosen = { reason: 'Lowest price and shortest wait: ₹83, about 3 min away.', by: 'rules' } as const
+function bookingForMe() {
+  const booked = booking(rapidoQuote(), 'CONFIRMED_SIMULATED', { chosen_by: chosen })
   const before = makeState()
   before.profile.show_ride_options = false
   const after = makeState({ activity: [booked] })
   after.profile.show_ride_options = false
-  let confirmed = false
+  let done = false
+  const state = () => (done ? after : before)
+  return { booked, before, finish: <T,>(value: T) => { done = true; return value }, state }
+}
+
+test('when Saathi books for me, one tap goes straight to the ride page with no confirm step', async () => {
+  const { booked, before, finish, state } = bookingForMe()
   const calls = stubApi({
-    'POST /quotes': () => quoted([demoRideQuote(), pick, olaQuote(), rideQuote()]),
-    'POST /quotes/*/confirm': () => { confirmed = true; return booked },
-    'GET /state': () => (confirmed ? after : before),
+    'POST /quotes': () => finish({ ...quoted([{ ...rapidoQuote(), recommended: chosen }, demoRideQuote()]), booking: booked }),
+    'GET /state': state,
   }, before)
   window.location.hash = '#/request/ride'
   render(<App />)
-  await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
-  await userEvent.click(screen.getByRole('button', { name: 'Find the best demo ride' }))
-  expect(await screen.findByRole('heading', { name: 'Check and confirm' })).toBeInTheDocument()
-  expect(screen.queryByRole('heading', { name: /demo prices/ })).not.toBeInTheDocument()
-  expect(screen.getByText('Rapido Auto to Doctor')).toBeInTheDocument()
-  expect(screen.getByText(/Lowest price and shortest wait: ₹83, about 3 min away\./)).toBeInTheDocument()
-  expect(screen.getByText('Chosen by Saathi’s price-and-wait rule (not AI).')).toBeInTheDocument()
+  expect(await screen.findByText(/book it for you straight away \(simulated\)/)).toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Where to?' }), 'Doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Book the best demo ride' }))
 
-  await userEvent.click(screen.getByRole('button', { name: 'Compare all options' }))
-  expect(screen.getByRole('heading', { name: '4 demo prices' })).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Choose Rapido Auto from Rapido' }))
-  expect(confirmCalls(calls)).toHaveLength(0)
-
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
   expect(await screen.findByRole('heading', { name: 'Demo driver on the way' })).toBeInTheDocument()
   expect(window.location.hash).toBe(`#/activity/${booked.id}`)
-  expect(confirmCalls(calls)).toHaveLength(1)
-  expect(confirmCalls(calls)[0].body).toEqual({ idempotency_key: expect.any(String), confirmed: true })
   expect(screen.getByText('Demo booking confirmed: DEMO-RIDE-1042. No real driver will come and no money moves.')).toBeInTheDocument()
-  expect(screen.queryByRole('heading', { name: 'Demo booking confirmed' })).not.toBeInTheDocument()
+  expect(screen.getByText('Booked for you by Saathi')).toBeInTheDocument()
+  expect(screen.getByText('Chosen by Saathi’s price-and-wait rule (not AI).')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Confirm demo booking' })).not.toBeInTheDocument()
+  expect(confirmCalls(calls)).toHaveLength(0)
+  expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'RIDE', pickup_place_id: 'place-home', destination_place_id: 'place-doctor', idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/) })
+})
+
+test('asking Saathi for a ride books it end to end when Saathi books for me', async () => {
+  const { booked, before, finish, state } = bookingForMe()
+  stubApi({ 'POST /ask': () => finish({ ...routedRide, service: 'ride', booking: booked }), 'GET /state': state }, before)
+  render(<App />)
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Or type it here' }), 'Take me to my doctor')
+  await userEvent.click(screen.getByRole('button', { name: 'Ask Saathi' }))
+  expect(await screen.findByRole('heading', { name: 'Demo driver on the way' })).toBeInTheDocument()
+  expect(window.location.hash).toBe(`#/activity/${booked.id}`)
+  expect(screen.getByText('Booked for you by Saathi')).toBeInTheDocument()
 })
 
 test('turning an option off saves the choice, and the page is honest that these are demos', async () => {
