@@ -190,9 +190,24 @@ def test_cancel_complete_and_lookup_follow_provider_rules():
 def test_meal_suggestions_respect_diet_spice_budget_and_enabled_apps():
     every = list(providers.APP_IDS)
     picks = providers.suggest_meals(every, vegetarian=True, mild=True, budget_minor=20000)
-    assert picks == [("swiggy", "khichdi"), ("ubereats", "dal"), ("zomato", "thali")]
-    assert providers.suggest_meals(every, True, True, 11000) == [("swiggy", "khichdi")]
-    assert providers.suggest_meals(["zomato"], True, True, 20000) == [("zomato", "thali")]
+    assert picks == [
+        ("demo-kitchen", "khichdi"),
+        ("swiggy", "khichdi"),
+        ("demo-kitchen", "dal"),
+        ("ubereats", "dal"),
+        ("zomato", "thali"),
+    ]
+    assert providers.suggest_meals(every, True, True, 11000) == [
+        ("demo-kitchen", "khichdi"),
+        ("swiggy", "khichdi"),
+    ]
+    # The provider's own kitchen stays available when every familiar name is off.
+    assert providers.suggest_meals(["zomato"], True, True, 20000) == [
+        ("demo-kitchen", "khichdi"),
+        ("demo-kitchen", "dal"),
+        ("zomato", "thali"),
+    ]
+    assert providers.suggest_meals([], True, True, 10500) == [("demo-kitchen", "khichdi")]
     anything = providers.suggest_meals(every, False, False, 50000)
     assert len(anything) == providers.MAX_FOOD_OPTIONS
     assert any(dish == "chicken" for _, dish in anything)
@@ -207,8 +222,10 @@ def test_catalogue_lists_options_under_familiar_names_with_integer_prices():
     catalogue = providers.service_catalogue(["ola", "swiggy"])
     rides = {option["id"]: option for option in catalogue["RIDE"]["options"]}
     assert rides["ola-mini"]["enabled"] and not rides["uber-go"]["enabled"]
+    assert rides["demo-ride"]["enabled"] and rides["demo-ride"]["app_name"] is None
     kitchens = {kitchen["id"]: kitchen for kitchen in catalogue["FOOD"]["kitchens"]}
     assert kitchens["swiggy"]["name"] == "Demo Home Kitchen" and kitchens["swiggy"]["enabled"]
+    assert kitchens["demo-kitchen"]["enabled"] and not kitchens["zomato"]["enabled"]
     prices = [item["price_minor"] for item in catalogue["PHARMACY"]["items"]]
     assert all(isinstance(price, int) and price > 0 for price in prices)
 

@@ -20,7 +20,7 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
     const connection = state.services?.find((item) => item.service_type === serviceTypeOf[service])
     if (connection && connection.status !== 'CONNECTED') return `Setup required: connect the ${connection.provider_label}`
     if (service === 'medicine') return 'Sample non-prescription items (demo)'
-    const names = state.catalogue.filter((app) => app.service === service && state.profile.enabled_providers.includes(app.id)).map((app) => app.name)
+    const names = [connection?.provider_label, ...state.catalogue.filter((app) => app.service === service && state.profile.enabled_providers.includes(app.id)).map((app) => app.name)].filter(Boolean)
     return names.length ? `${names.join(' · ')} (demo)` : 'Turn on an option in Services first'
   }
   const unfinished = (state.quotes ?? []).filter((quote) => quote.status === 'ACTIVE' && quote.expires_at * 1000 > now).at(-1)

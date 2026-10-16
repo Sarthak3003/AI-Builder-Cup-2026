@@ -30,7 +30,7 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
           <li>Set up Saathi once: your name, comfort settings, saved places, Care Circle, demo services and how simulated payments work.</li>
           <li>Ask for a ride, a meal or everyday pharmacy items, by typing or speaking, instead of calling family.</li>
           <li>See a server price with every line explained, then confirm. Saathi books only after your clear yes.</li>
-          <li>Compare demo options shown under familiar names: Uber, Ola and Rapido for rides; Uber Eats, Swiggy and Zomato for food.</li>
+          <li>Book with Saathi&rsquo;s own Demo Ride or Saathi Demo Kitchen, or compare example options shown under familiar names: Uber, Ola and Rapido for rides; Uber Eats, Swiggy and Zomato for food.</li>
           <li>Invite a family member who can see shared activity, or also approve larger bookings. They cannot book or pay for you.</li>
           <li>Larger text, high contrast, read aloud, Hindi labels, and install on your home screen.</li>
         </ul>

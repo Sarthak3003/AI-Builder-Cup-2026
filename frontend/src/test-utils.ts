@@ -63,6 +63,7 @@ export function demoServices(status: ConnectionStatus = 'CONNECTED'): DemoServic
     { ...base, service_type: 'RIDE', provider_type: 'DEMO_RIDE', provider_label: 'Demo Ride Provider', description: 'Simulated rides. Options appear under familiar names (Uber, Ola, Rapido) as examples only.',
       granted_capabilities: on ? ['quote_rides', 'book_rides', 'cancel_rides'] : [], capabilities: [{ id: 'quote_rides', label: 'Get sample ride fares' }, { id: 'book_rides', label: 'Make simulated ride bookings' }],
       catalogue: { options: [
+        { id: 'demo-ride', name: 'Demo Ride', app_id: null, app_name: null, pickup_min: 4, enabled: true },
         { id: 'rapido-auto', name: 'Rapido Auto', app_id: 'rapido', app_name: 'Rapido', pickup_min: 3, enabled: true },
         { id: 'ola-mini', name: 'Ola Mini', app_id: 'ola', app_name: 'Ola', pickup_min: 5, enabled: true },
         { id: 'uber-go', name: 'Uber Go', app_id: 'uber', app_name: 'Uber', pickup_min: 6, enabled: true },
@@ -70,6 +71,10 @@ export function demoServices(status: ConnectionStatus = 'CONNECTED'): DemoServic
     { ...base, service_type: 'FOOD', provider_type: 'DEMO_FOOD', provider_label: 'Demo Food Provider', description: 'Simulated meals from fictional demo kitchens.',
       granted_capabilities: on ? ['quote_orders', 'place_orders', 'cancel_orders'] : [], capabilities: [{ id: 'quote_orders', label: 'Get sample prices' }],
       catalogue: { delivery_fee_minor: 2500, kitchens: [
+        { id: 'demo-kitchen', name: 'Saathi Demo Kitchen', app_name: null, enabled: true, items: [
+          { id: 'khichdi', name: 'Vegetable khichdi', price_minor: 8000, vegetarian: true, mild: true, minutes: 25 },
+          { id: 'dal', name: 'Dal and rice', price_minor: 9500, vegetarian: true, mild: true, minutes: 30 },
+        ] },
         { id: 'swiggy', name: 'Demo Home Kitchen', app_name: 'Swiggy', enabled: true, items: [
           { id: 'khichdi', name: 'Vegetable khichdi', price_minor: 8500, vegetarian: true, mild: true, minutes: 25 },
           { id: 'roti', name: 'Two rotis', price_minor: 2000, vegetarian: true, mild: true, minutes: 15 },
@@ -102,6 +107,10 @@ export function rideQuote(overrides: Partial<Quote> = {}): Quote {
 export const rapidoQuote = () => rideQuote({
   id: 'q-rapido', option_id: 'rapido-auto', option_name: 'Rapido Auto', app_id: 'rapido', app_name: 'Rapido', title: 'Rapido Auto to Doctor',
   line_items: [{ label: 'Base fare', amount_minor: 2500 }, { label: 'Distance, 5.3 km at ₹11/km', amount_minor: 5800 }], amount_minor: 8300, pickup_eta_min: 3,
+})
+export const demoRideQuote = () => rideQuote({
+  id: 'q-demo-ride', option_id: 'demo-ride', option_name: 'Demo Ride', app_id: null, app_name: null, title: 'Demo Ride to Doctor',
+  line_items: [{ label: 'Base fare', amount_minor: 3000 }, { label: 'Distance, 5.3 km at ₹12/km', amount_minor: 6400 }], amount_minor: 9400, pickup_eta_min: 4,
 })
 export const olaQuote = () => rideQuote({
   id: 'q-ola', option_id: 'ola-mini', option_name: 'Ola Mini', app_id: 'ola', app_name: 'Ola', title: 'Ola Mini to Doctor',

@@ -42,10 +42,10 @@ CAPABILITY_LABELS = {
     "cancel_orders": "Cancel simulated orders",
 }
 DESCRIPTIONS = {
-    "RIDE": "Simulated rides. Options appear under familiar names (Uber, Ola, Rapido) as "
-    "examples only: Saathi is not connected to those companies.",
-    "FOOD": "Simulated meals from fictional demo kitchens, listed under familiar app names "
-    "(Uber Eats, Swiggy, Zomato) as examples only.",
+    "RIDE": "Simulated rides: the provider's own Demo Ride, plus example options under familiar "
+    "names (Uber, Ola, Rapido). Saathi is not connected to those companies.",
+    "FOOD": "Simulated meals: the provider's own Saathi Demo Kitchen, plus fictional kitchens "
+    "listed under familiar app names (Uber Eats, Swiggy, Zomato) as examples only.",
     "PHARMACY": "Simulated orders of sample non-prescription items. No prescriptions and no "
     "medical advice.",
 }

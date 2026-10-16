@@ -109,6 +109,11 @@ def expire_quotes(state: dict, now: float) -> None:
             quote["status"] = "EXPIRED"
 
 
+def offer_order(quote: dict) -> tuple:
+    # The demo provider's own option first, then familiar-name examples, cheapest first.
+    return (quote["app_id"] is not None, quote["amount_minor"], quote["option_id"])
+
+
 def _prune(state: dict) -> None:
     # Keep every active quote; drop the oldest used or expired ones beyond the limit.
     spare = len(state["quotes"]) - MAX_QUOTES
@@ -135,13 +140,11 @@ def create_quotes(
         pickup, destination, appointment_id = _ride_places(state, body)
         if body.option_id:
             option = next((o for o in RIDE_OPTIONS if o.id == body.option_id), None)
-            if option and option.app_id not in enabled_apps:
+            if option and option.app_id and option.app_id not in enabled_apps:
                 raise HTTPException(409, f"{APP_NAMES[option.app_id]} is switched off in Services.")
             options = [body.option_id]
         else:
             options = ride_option_ids(enabled_apps)
-        if not options:
-            raise HTTPException(409, "Switch on at least one ride option in Services.")
         requests = [
             QuoteRequest(
                 service_type="RIDE", option_id=option, pickup=pickup, destination=destination
@@ -183,7 +186,7 @@ def create_quotes(
                 "booking_id": None,
             }
         )
-    quotes.sort(key=lambda quote: (quote["amount_minor"], quote["option_id"]))
+    quotes.sort(key=offer_order)
     state["quotes"].extend(quotes)
     _prune(state)
     return {"request_id": request_id, "service_type": service_type, "quotes": quotes}

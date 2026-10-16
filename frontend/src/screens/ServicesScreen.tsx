@@ -16,7 +16,7 @@ function AppToggles({ hub, service }: { hub: Hub; service: DemoService }) {
   }
   return (
     <div className="app-group">
-      <p className="muted"><strong>Options shown under familiar names.</strong> Saathi has no link to these companies; every choice is simulated by the {service.provider_label}.</p>
+      <p className="muted"><strong>Extra options under familiar names.</strong> The {service.provider_label}&rsquo;s own option is always offered. Saathi has no link to these companies, and the {service.provider_label} simulates every choice.</p>
       <ul className="app-list">
         {apps.map((app) => {
           const on = enabled.includes(app.id)

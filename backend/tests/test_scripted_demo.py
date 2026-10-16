@@ -124,11 +124,13 @@ def test_the_scripted_hackathon_demo(owner):
         owner.post("/api/hub/quotes", json={"service_type": "RIDE", "destination_place_id": doctor})
     )["quotes"]
     assert [(q["title"], q["amount_minor"]) for q in offered] == [
+        ("Demo Ride to Doctor", 9400),
         ("Rapido Auto to Doctor", 8300),
         ("Ola Mini to Doctor", 12500),
         ("Uber Go to Doctor", 13500),
     ]
     chosen = offered[0]
+    assert (chosen["provider_label"], chosen["app_name"]) == ("Demo Ride Provider", None)
     assert chosen["notice"] == "Demo ride — no real driver will arrive."
     assert chosen["expires_at"] > chosen["created_at"]
 

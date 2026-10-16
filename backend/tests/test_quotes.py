@@ -47,8 +47,9 @@ def test_a_ride_request_returns_server_priced_quotes_for_each_switched_on_option
     places = set_up(owner)
     result = ok(quote(owner, service_type="RIDE", destination_place_id=places["Doctor"]))
     quotes = result["quotes"]
-    assert [q["option_name"] for q in quotes] == ["Rapido Auto", "Ola Mini", "Uber Go"]
-    assert [q["amount_minor"] for q in quotes] == [8300, 12500, 13500]
+    assert [q["option_name"] for q in quotes] == ["Demo Ride", "Rapido Auto", "Ola Mini", "Uber Go"]
+    assert [q["amount_minor"] for q in quotes] == [9400, 8300, 12500, 13500]
+    assert [q["app_name"] for q in quotes] == [None, "Rapido", "Ola", "Uber"]
     for q in quotes:
         assert q["provider_label"] == "Demo Ride Provider" and q["simulated"] is True
         assert q["currency"] == "INR" and q["status"] == "ACTIVE"
@@ -60,7 +61,7 @@ def test_a_ride_request_returns_server_priced_quotes_for_each_switched_on_option
         assert q["pickup_eta_min"] and q["duration_min"]
         assert q["payment_method"] == "DEMO_WALLET" and q["approval"]["required"] is False
         assert q["request_id"] == result["request_id"]
-    assert len({q["id"] for q in quotes}) == 3
+    assert len({q["id"] for q in quotes}) == 4
     state = ok(owner.get("/api/hub/state"))
     assert state["activity"] == []
     assert {q["id"] for q in state["quotes"]} == {q["id"] for q in quotes}
@@ -77,7 +78,7 @@ def test_one_option_typed_destinations_and_saved_place_names(owner):
     }
     named = ok(quote(owner, service_type="RIDE", destination_text="my doctor"))
     assert named["quotes"][0]["details"]["destination"]["label"] == "Doctor"
-    assert named["quotes"][0]["amount_minor"] == 8300
+    assert named["quotes"][0]["amount_minor"] == 9400
 
 
 def test_an_unconnected_service_cannot_be_quoted_and_says_how_to_connect(owner):
@@ -132,16 +133,19 @@ def test_switched_off_options_are_neither_offered_nor_quotable(owner):
     profile["enabled_providers"] = ["ola", "zomato"]
     ok(owner.put("/api/hub/profile", json=profile))
     rides = ok(quote(owner, service_type="RIDE", destination_text="Market"))["quotes"]
-    assert [q["option_id"] for q in rides] == ["ola-mini"]
+    assert [q["option_id"] for q in rides] == ["demo-ride", "ola-mini"]
     assert quote(
         owner, service_type="RIDE", option_id="uber-go", destination_text="X"
     ).status_code == (409)
     meal = {"service_type": "FOOD", "option_id": "swiggy", "items": [{"item_id": "khichdi"}]}
     assert quote(owner, **meal).json()["detail"] == "Swiggy is switched off in Services."
-    profile["enabled_providers"] = ["zomato"]
+    profile["enabled_providers"] = []
     ok(owner.put("/api/hub/profile", json=profile))
-    none = quote(owner, service_type="RIDE", destination_text="Market")
-    assert none.status_code == 409 and "Switch on at least one" in none.json()["detail"]
+    # The demo providers' own options have no familiar name, so they cannot be switched off.
+    only = ok(quote(owner, service_type="RIDE", destination_text="Market"))["quotes"]
+    assert [q["option_id"] for q in only] == ["demo-ride"]
+    own = {"service_type": "FOOD", "option_id": "demo-kitchen", "items": [{"item_id": "dal"}]}
+    assert ok(quote(owner, **own))["quotes"][0]["app_id"] is None
 
 
 def test_food_and_pharmacy_quotes_itemise_and_label_the_simulation(owner):
@@ -171,6 +175,7 @@ def test_quotes_preview_the_payment_method_and_the_owners_approval_rule(owner):
     ok(owner.put("/api/hub/profile", json=profile))
     rides = ok(quote(owner, service_type="RIDE", destination_place_id=places["Doctor"]))["quotes"]
     preview = {q["option_id"]: q["approval"] for q in rides}
+    assert preview["demo-ride"] == {"required": False, "reason": ""}
     assert preview["rapido-auto"] == {"required": False, "reason": ""}
     assert preview["uber-go"] == {"required": True, "reason": "Above the ₹100 approval limit."}
     assert {q["payment_method"] for q in rides} == {"PAY_ON_COMPLETION"}

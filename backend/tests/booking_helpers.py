@@ -36,7 +36,7 @@ def confirm(api, quote, key=None):
 
 
 def book(api, service="ride", option=None, **extra):
-    """Quote and confirm in one go. Rides use the cheapest option unless one is named."""
+    """Quote and confirm in one go. Rides use the Demo Ride unless an option is named."""
     offered = quotes(api, service, **extra)
     chosen = next(q for q in offered if q["option_id"] == option) if option else offered[0]
     return ok(confirm(api, chosen))

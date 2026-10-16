@@ -42,7 +42,7 @@ function Menu({ items, counts, onChange }: { items: MenuItem[]; counts: Record<s
   )
 }
 
-const optionLabel = (quote: Quote) => (quote.service === 'ride' && quote.app_name ? `${quote.option_name} from ${quote.app_name}` : quote.title)
+const optionLabel = (quote: Quote) => (quote.service === 'ride' ? `${quote.option_name} from ${quote.app_name ?? quote.provider_label}` : quote.title)
 
 export default function RequestScreen({ hub, service, proposalId, simple = false }: { hub: Hub; service: Service; proposalId?: string; simple?: boolean }) {
   const { state, busy, run, refresh, setState } = hub
@@ -168,7 +168,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
                 <>
                   <label className="field"><span>Kitchen</span>
                     <select value={kitchenId} onChange={(event) => { setKitchenId(event.target.value); setCounts({}) }}>
-                      {kitchens.map((kitchen) => <option key={kitchen.id} value={kitchen.id}>{kitchen.name} · listed on {kitchen.app_name} (demo)</option>)}
+                      {kitchens.map((kitchen) => <option key={kitchen.id} value={kitchen.id}>{kitchen.app_name ? `${kitchen.name} · listed on ${kitchen.app_name} (demo)` : `${kitchen.name} · ${provider?.provider_label}`}</option>)}
                     </select>
                   </label>
                   <Menu items={kitchens.find((k) => k.id === kitchenId)?.items ?? []} counts={counts} onChange={(id, value) => setCounts({ ...counts, [id]: value })} />
@@ -199,7 +199,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               <article key={quote.id} className="option card">
                 <ProviderBadge id={quote.app_id ?? quote.provider_type} name={quote.app_name ?? quote.provider_label} />
                 <h3>{service === 'ride' ? quote.option_name : quote.title}</h3>
-                {simple ? null : <p className="muted">Simulated by the {quote.provider_label}</p>}
+                {simple ? null : <p className="muted">{quote.app_name ? `Simulated by the ${quote.provider_label}` : 'Saathi’s own demo service'}</p>}
                 <div className="option-foot">
                   <div>
                     <strong className="price">{formatINR(quote.amount_minor)}</strong>

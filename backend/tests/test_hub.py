@@ -159,11 +159,13 @@ def test_ask_routes_one_sentence_to_quotes_without_booking(client, monkeypatch):
         "keywords",
     )
     assert ride["input"]["destination"] == "Dr Mehta's clinic"
-    assert {q["app_id"] for q in ride["quotes"]} == {"uber", "ola", "rapido"}
+    assert [q["app_id"] for q in ride["quotes"]] == [None, "rapido", "ola", "uber"]
     assert {q["request_id"] for q in ride["quotes"]} == {ride["request_id"]}
     food = ask(client, "something light to eat under 120", channel="app")
-    assert [(q["app_id"], q["details"]["items"][0]["item_id"]) for q in food["quotes"]] == [
-        ("swiggy", "khichdi")
+    assert [(q["option_id"], q["details"]["items"][0]["item_id"]) for q in food["quotes"]] == [
+        ("demo-kitchen", "khichdi"),
+        ("demo-kitchen", "dal"),
+        ("swiggy", "khichdi"),
     ]
     state = client.get("/api/hub/state").json()
     assert state["activity"] == []
@@ -289,7 +291,11 @@ def test_channels_share_history_and_profile(client, monkeypatch):
     client.put("/api/hub/profile", json=profile)
     for channel in ["app", "message", "voice"]:
         reply = ask(client, "I am hungry, something light", channel=channel)
-        assert [q["option_id"] for q in reply["quotes"]] == ["swiggy"]
+        assert [q["option_id"] for q in reply["quotes"]] == [
+            "demo-kitchen",
+            "demo-kitchen",
+            "swiggy",
+        ]
         ok(confirm(client, reply["quotes"][0]))
     state = client.get("/api/hub/state").json()
     assert state["profile"]["name"] == "Demo user"

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import type { AskResult, Profile, Quote } from './hub'
-import { booking, fail, makeCareState, makeState, mealQuote, olaQuote, rapidoQuote, rideQuote, stubApi } from './test-utils'
+import { booking, demoRideQuote, fail, makeCareState, makeState, mealQuote, olaQuote, rapidoQuote, rideQuote, stubApi } from './test-utils'
 
 // jsdom cannot decode audio; the real conversion is covered in lib.test.ts.
 vi.mock('./wav', async (original) => ({ ...(await original<typeof import('./wav')>()), toWav: async () => new TextEncoder().encode('RIFF').buffer }))
@@ -17,7 +17,7 @@ afterEach(() => {
   Reflect.deleteProperty(navigator, 'mediaDevices')
 })
 
-const rides = () => [rapidoQuote(), olaQuote(), rideQuote()]
+const rides = () => [demoRideQuote(), rapidoQuote(), olaQuote(), rideQuote()]
 const quoted = (quotes: Quote[]) => ({ request_id: quotes[0].request_id, service_type: quotes[0].service_type, quotes })
 const confirmCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.url.endsWith('/confirm'))
 const quoteCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.method === 'POST' && call.url.endsWith('/quotes'))
@@ -26,8 +26,8 @@ test('home greets the user, shows which apps each card compares, and the live st
   stubApi()
   render(<App />)
   expect(await screen.findByText('Hello, Friend.')).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: /Book a ride\s*Uber · Ola · Rapido \(demo\)/ })).toHaveAttribute('href', '#/request/ride')
-  expect(screen.getByRole('link', { name: /Order food\s*Uber Eats · Swiggy · Zomato \(demo\)/ })).toHaveAttribute('href', '#/request/food')
+  expect(screen.getByRole('link', { name: /Book a ride\s*Demo Ride Provider · Uber · Ola · Rapido \(demo\)/ })).toHaveAttribute('href', '#/request/ride')
+  expect(screen.getByRole('link', { name: /Order food\s*Demo Food Provider · Uber Eats · Swiggy · Zomato \(demo\)/ })).toHaveAttribute('href', '#/request/food')
   expect(screen.getByRole('link', { name: /Medicine request/ })).toHaveAttribute('href', '#/request/medicine')
   expect(screen.getByText(/no need to call family/i)).toBeInTheDocument()
   expect(await screen.findByText('Backend connected · v0.1.0')).toBeInTheDocument()
@@ -38,7 +38,7 @@ test('apps the user turned off disappear from the home cards', async () => {
   state.profile.enabled_providers = state.profile.enabled_providers.filter((id) => id !== 'uber')
   stubApi({}, state)
   render(<App />)
-  expect(await screen.findByRole('link', { name: /Book a ride\s*Ola · Rapido \(demo\)/ })).toBeInTheDocument()
+  expect(await screen.findByRole('link', { name: /Book a ride\s*Demo Ride Provider · Ola · Rapido \(demo\)/ })).toBeInTheDocument()
 })
 
 type Heard = { results: ArrayLike<{ isFinal?: boolean; 0: { transcript: string } }> }
@@ -87,9 +87,9 @@ test('one tap on the big microphone: Saathi hears the request, works out the ser
   expect(calls.some((call) => call.url.endsWith('/ask'))).toBe(false)
   act(() => engine?.onresult?.({ results: [{ isFinal: true, 0: { transcript: spoken } }] }))
 
-  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '4 demo prices' })).toBeInTheDocument()
   expect(window.location.hash).toBe('#/request/ride/r-1')
-  expect(screen.getByRole('button', { name: 'Choose Uber Go from Uber' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Choose Demo Ride from Demo Ride Provider' })).toBeInTheDocument()
   expect(calls.filter((call) => call.url.endsWith('/ask')).map((call) => call.body)).toEqual([expect.objectContaining({ message: spoken, channel: 'voice' })])
   expect(confirmCalls(calls)).toHaveLength(0)
 })
@@ -166,7 +166,7 @@ test('with Gemini on, the microphone records, Gemini hears and routes it, and no
   expect(FakeRecorder.last?.state).toBe('recording')
   await userEvent.click(await screen.findByRole('button', { name: 'Listening… tap to stop' }))
 
-  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '4 demo prices' })).toBeInTheDocument()
   expect(release).toHaveBeenCalled()
   const voice = calls.filter((call) => call.url.endsWith('/ask/voice'))
   expect(voice.map((call) => call.body)).toEqual([{ id: expect.any(String), audio: 'UklGRg==' }])
@@ -217,7 +217,7 @@ test('each service has its own form', async () => {
   expect(screen.getByRole('button', { name: 'More: ORS sachets, pack of 5 (sample)' })).toBeInTheDocument()
   expect(screen.queryByRole('combobox', { name: 'Where to?' })).not.toBeInTheDocument()
   window.location.hash = '#/request/food'
-  expect(await screen.findByRole('combobox', { name: 'Kitchen' })).toHaveDisplayValue('Demo Home Kitchen · listed on Swiggy (demo)')
+  expect(await screen.findByRole('combobox', { name: 'Kitchen' })).toHaveDisplayValue('Saathi Demo Kitchen · Demo Food Provider')
   expect(screen.getByRole('button', { name: 'Get demo price' })).toBeDisabled()
 })
 
@@ -228,11 +228,12 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
 
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
   await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
-  expect(await screen.findByRole('heading', { name: '3 demo prices' })).toHaveFocus()
+  expect(await screen.findByRole('heading', { name: '4 demo prices' })).toHaveFocus()
   expect(quoteCalls(calls).map((call) => call.body)).toEqual([{ service_type: 'RIDE', pickup_place_id: 'place-home', destination_place_id: 'place-doctor' }])
-  for (const name of ['Choose Rapido Auto from Rapido', 'Choose Ola Mini from Ola', 'Choose Uber Go from Uber']) {
+  for (const name of ['Choose Demo Ride from Demo Ride Provider', 'Choose Rapido Auto from Rapido', 'Choose Ola Mini from Ola', 'Choose Uber Go from Uber']) {
     expect(screen.getByRole('button', { name })).toBeInTheDocument()
   }
+  expect(screen.getByText('Saathi’s own demo service')).toBeInTheDocument()
   expect(screen.getAllByText('Simulated by the Demo Ride Provider')).toHaveLength(3)
 
   await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
@@ -314,7 +315,7 @@ test('a meal is chosen from a kitchen menu and priced by the server with a demo 
   await userEvent.click(more)
   await userEvent.click(more)
   await userEvent.click(screen.getByRole('button', { name: 'Get demo price' }))
-  expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'FOOD', option_id: 'swiggy', items: [{ item_id: 'khichdi', quantity: 2 }] })
+  expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'FOOD', option_id: 'demo-kitchen', items: [{ item_id: 'khichdi', quantity: 2 }] })
   expect(await screen.findByRole('heading', { name: 'Check and confirm' })).toBeInTheDocument()
   expect(screen.getByText('Vegetable khichdi × 2')).toBeInTheDocument()
   expect(screen.getByText('Delivery fee (demo)')).toBeInTheDocument()

@@ -52,7 +52,8 @@ def test_confirming_a_quote_makes_one_simulated_booking_with_a_separate_payment(
         "updated_at": booking["payment"]["updated_at"],
         "refund": None,
     }
-    assert booking["amount_minor"] == chosen["amount_minor"] == 8300
+    assert booking["amount_minor"] == chosen["amount_minor"] == 9400
+    assert (booking["option_name"], booking["app_name"]) == ("Demo Ride", None)
     assert booking["notice"] == "Demo ride — no real driver will arrive."
     after = state(owner)
     assert after["quotes"] == [], "every quote from this request is used up or expired"

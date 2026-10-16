@@ -29,6 +29,7 @@ from app.bookings import (
     decide,
     expire_approvals,
     find_booking,
+    offer_order,
     settle,
 )
 from app.care import (
@@ -717,7 +718,7 @@ def hub_router(config: Settings):
                 made = create_quotes(state, body, apps(state), group=group)
                 group = made["request_id"]
                 quotes += made["quotes"]
-            quotes.sort(key=lambda quote: (quote["amount_minor"], quote["option_id"]))
+            quotes.sort(key=offer_order)
             return {"request_id": group, "service_type": "FOOD", "quotes": quotes}
         products = match_products(f"{message} {draft.medicine}")
         if not products:

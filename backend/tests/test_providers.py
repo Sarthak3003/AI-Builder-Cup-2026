@@ -63,7 +63,8 @@ def test_meal_suggestions_follow_diet_spice_and_budget(client):
             json={"id": str(uuid4()), "message": "I'm hungry, something light to eat"},
         )
     )
-    assert {q["app_id"] for q in reply["quotes"]} == {"ubereats", "swiggy", "zomato"}
+    assert {q["app_id"] for q in reply["quotes"]} == {None, "ubereats", "swiggy", "zomato"}
+    assert reply["quotes"][0]["option_name"] == "Saathi Demo Kitchen"
     for quote in reply["quotes"]:
         item = quote["details"]["items"][0]
         assert item["vegetarian"] and item["mild"] and quote["amount_minor"] <= 20000

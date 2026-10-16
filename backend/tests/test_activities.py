@@ -42,7 +42,7 @@ def test_the_owner_and_a_caretaker_see_the_same_persisted_ride_event(app, owner)
     ride = book(owner, destination_text="Doctor")
     mine = ok(owner.get("/api/hub/activities"))
     booked = next(e for e in mine if e["kind"] == "booked" and e["ref"] == ride["id"])
-    assert booked["title"] == "Booked (simulated): Rapido Auto to Doctor"
+    assert booked["title"] == "Booked (simulated): Demo Ride to Doctor"
     assert "DEMO-RIDE-1042" in booked["detail"] and "no real driver" in booked["detail"]
     seen = circle(ravi)
     assert booked["id"] in [e["id"] for e in seen["events"]]

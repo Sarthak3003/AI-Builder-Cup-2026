@@ -226,7 +226,7 @@ def test_demo_connections_need_consent_and_record_capabilities(owner):
     food = next(s for s in state["services"] if s["service_type"] == "FOOD")
     assert food["status"] == "CONNECTED" and food["consent_at"]
     assert food["granted_capabilities"] == ["quote_orders", "place_orders", "cancel_orders"]
-    assert [k["name"] for k in food["catalogue"]["kitchens"]][0] == "Demo Tiffin Kitchen"
+    assert [k["name"] for k in food["catalogue"]["kitchens"]][0] == "Saathi Demo Kitchen"
     state = ok(owner.post("/api/hub/services/FOOD/disconnect"))
     food = next(s for s in state["services"] if s["service_type"] == "FOOD")
     assert (food["status"], food["granted_capabilities"]) == ("DISCONNECTED", [])

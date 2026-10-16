@@ -60,12 +60,12 @@ async function rideToDoctor(page) {
   await meera.getByRole('button', { name: 'Yes, finish setup' }).click();
   await meera.getByRole('heading', { name: 'You are all set, Meera' }).waitFor();
 
-  // 2. A ride to the doctor: server prices, then the full price and the demo warning before any booking.
+  // 2. A ride to the doctor with the Demo Ride Provider's own option: the price and the demo warning first.
   await rideToDoctor(meera);
-  await meera.getByRole('button', { name: 'Choose Rapido Auto from Rapido' }).click();
+  await meera.getByRole('button', { name: 'Choose Demo Ride from Demo Ride Provider' }).click();
   await meera.getByRole('heading', { name: 'Check and confirm' }).waitFor();
   await meera.getByText('Demo ride — no real driver will arrive.').waitFor();
-  assert.equal(await meera.locator('.review-price').innerText(), '₹83');
+  assert.equal(await meera.locator('.review-price').innerText(), '₹94');
 
   // 3. Confirm: a stable demo reference, separate booking and payment statuses, no money charged.
   await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
@@ -82,16 +82,16 @@ async function rideToDoctor(page) {
   // 4. The same event in Meera's timeline and in Ravi's Care Circle view, without addresses or payment.
   await tab(meera, 'Activity').click();
   const mine = meera.getByRole('region', { name: 'Timeline' });
-  await mine.getByText('Booked (simulated): Rapido Auto to Doctor').waitFor();
+  await mine.getByText('Booked (simulated): Demo Ride to Doctor').waitFor();
   const ravi = await open();
   ravi.on('pageerror', (error) => errors.push(error.message));
   await ravi.goto(raviLink);
   await ravi.getByRole('button', { name: 'Join as caretaker' }).click();
   await ravi.getByRole('heading', { name: 'Supporting Meera' }).waitFor();
   await tab(ravi, 'Activity').click();
-  await ravi.getByRole('region', { name: 'Timeline' }).getByText('Booked (simulated): Rapido Auto to Doctor').waitFor();
+  await ravi.getByRole('region', { name: 'Timeline' }).getByText('Booked (simulated): Demo Ride to Doctor').waitFor();
   await ravi.goto(`${BASE}/${detail}`);
-  await ravi.getByRole('heading', { name: 'Rapido Auto to Doctor' }).waitFor();
+  await ravi.getByRole('heading', { name: 'Demo Ride to Doctor' }).waitFor();
   const seen = await ravi.locator('main').innerText();
   assert(!/Sample Lane|Example Road|Paid \(simulated\)/.test(seen), 'Ravi sees an address or payment he was not given');
 
@@ -106,7 +106,7 @@ async function rideToDoctor(page) {
   await meera.getByRole('button', { name: 'Make the next booking fail' }).click();
   await meera.getByText(/The next booking you confirm will fail/).waitFor();
   await rideToDoctor(meera);
-  await meera.getByRole('button', { name: 'Choose Rapido Auto from Rapido' }).click();
+  await meera.getByRole('button', { name: 'Choose Demo Ride from Demo Ride Provider' }).click();
   await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
   await meera.getByRole('heading', { name: 'Booking failed' }).waitFor();
   await meera.getByText('Failed · nothing booked').waitFor();

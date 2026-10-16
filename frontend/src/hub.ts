@@ -20,9 +20,9 @@ export type Place = { id: string; label: string; address: string; notes: string;
 export type SamplePlace = { label: string; address: string; notes: string }
 export type ServiceType = 'RIDE' | 'FOOD' | 'PHARMACY'
 export type ConnectionStatus = 'CONNECTED' | 'DISCONNECTED' | 'SETUP_REQUIRED'
-export type RideOptionInfo = { id: string; name: string; app_id: string; app_name: string; pickup_min: number; enabled: boolean }
+export type RideOptionInfo = { id: string; name: string; app_id: string | null; app_name: string | null; pickup_min: number; enabled: boolean }
 export type MenuItem = { id: string; name: string; price_minor: number; vegetarian?: boolean; mild?: boolean; minutes?: number }
-export type KitchenInfo = { id: string; name: string; app_name: string; enabled: boolean; items: MenuItem[] }
+export type KitchenInfo = { id: string; name: string; app_name: string | null; enabled: boolean; items: MenuItem[] }
 export type Catalogue = { options?: RideOptionInfo[]; kitchens?: KitchenInfo[]; items?: MenuItem[]; delivery_fee_minor?: number }
 export type DemoService = {
   service_type: ServiceType; provider_type: string; provider_label: string; connection_mode: 'SIMULATED'; status: ConnectionStatus;

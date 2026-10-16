@@ -8,12 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain import CURRENCY, SERVICE_KEY, ProviderType, ServiceType
 
-MAX_FOOD_OPTIONS = 4
+MAX_FOOD_OPTIONS = 5
 
 
 # ---------------------------------------------------------------------------------------------
 # Demo service providers. One simulated provider per category carries out every booking.
-# Familiar app names (Uber, Ola, Rapido, Uber Eats, Swiggy, Zomato) are only labels on options:
+# Each offers its own option (Demo Ride, Saathi Demo Kitchen), plus example options under
+# familiar app names (Uber, Ola, Rapido, Uber Eats, Swiggy, Zomato). Those names are only labels:
 # Saathi has no link to those companies, and nothing is dispatched, delivered or charged.
 # ---------------------------------------------------------------------------------------------
 
@@ -47,7 +48,7 @@ class ItemRequest(BaseModel):
 class QuoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     service_type: ServiceType
-    # A ride option ("uber-go") or the food app a kitchen is listed under ("swiggy").
+    # A ride option ("demo-ride", "uber-go") or a kitchen ("demo-kitchen", "swiggy").
     option_id: str | None = Field(default=None, max_length=40)
     pickup: PlaceRef | None = None
     destination: PlaceRef | None = None
@@ -134,6 +135,15 @@ def enabled_apps(profile: dict) -> list[str]:
     return list(APP_IDS) if saved is None else [app for app in saved if app in APP_IDS]
 
 
+def _app_name(app_id: str | None) -> str | None:
+    return APP_NAMES[app_id] if app_id else None
+
+
+def _offered(app_id: str | None, enabled_apps: list[str]) -> bool:
+    # A demo provider's own option has no familiar name and cannot be switched off.
+    return app_id is None or app_id in enabled_apps
+
+
 def apps_catalogue() -> list[dict]:
     return [
         {
@@ -150,7 +160,7 @@ def apps_catalogue() -> list[dict]:
 class RideOption(NamedTuple):
     id: str
     name: str
-    app_id: str
+    app_id: str | None
     base_minor: int
     per_km_minor: int
     pickup_min: int
@@ -167,8 +177,9 @@ class MenuItem(NamedTuple):
 
 
 class Kitchen(NamedTuple):
-    app_id: str
+    id: str
     name: str
+    app_id: str | None
     items: tuple[MenuItem, ...]
 
 
@@ -181,6 +192,7 @@ class Product(NamedTuple):
 
 # Fixed sample pricing so every demo run shows the same fares.
 RIDE_OPTIONS = (
+    RideOption("demo-ride", "Demo Ride", None, 3000, 1200, 4),
     RideOption("rapido-auto", "Rapido Auto", "rapido", 2500, 1100, 3),
     RideOption("ola-mini", "Ola Mini", "ola", 4500, 1500, 5),
     RideOption("uber-go", "Uber Go", "uber", 5000, 1600, 6),
@@ -188,8 +200,21 @@ RIDE_OPTIONS = (
 FOOD_DELIVERY_FEE = 2500
 KITCHENS = (
     Kitchen(
+        "demo-kitchen",
+        "Saathi Demo Kitchen",
+        None,
+        (
+            MenuItem("khichdi", "Vegetable khichdi", 8000, True, True, 25),
+            MenuItem("dal", "Dal and rice", 9500, True, True, 30),
+            MenuItem("paneer", "Paneer meal", 14000, True, False, 30),
+            MenuItem("chicken", "Chicken and rice", 16000, False, False, 35),
+            MenuItem("roti", "Two rotis", 2000, True, True, 15, main=False),
+        ),
+    ),
+    Kitchen(
         "ubereats",
         "Demo Tiffin Kitchen",
+        "ubereats",
         (
             MenuItem("dal", "Dal and rice", 10500, True, True, 30),
             MenuItem("paneer", "Paneer meal", 16500, True, False, 35),
@@ -200,6 +225,7 @@ KITCHENS = (
     Kitchen(
         "swiggy",
         "Demo Home Kitchen",
+        "swiggy",
         (
             MenuItem("khichdi", "Vegetable khichdi", 8500, True, True, 25),
             MenuItem("paneer", "Paneer meal", 15500, True, False, 30),
@@ -210,6 +236,7 @@ KITCHENS = (
     Kitchen(
         "zomato",
         "Demo Thali House",
+        "zomato",
         (
             MenuItem("thali", "Mini veg thali", 12500, True, True, 40),
             MenuItem("paneer", "Paneer meal", 14500, True, False, 40),
@@ -218,7 +245,7 @@ KITCHENS = (
         ),
     ),
 )
-_KITCHENS = {kitchen.app_id: kitchen for kitchen in KITCHENS}
+_KITCHENS = {kitchen.id: kitchen for kitchen in KITCHENS}
 PHARMACY_OPTION = "demo-pharmacy"
 PHARMACY_DELIVERY_FEE = 2000
 PHARMACY_MINUTES = 45
@@ -383,7 +410,7 @@ class DemoRideProvider(_DemoProvider):
             option_id=option.id,
             option_name=option.name,
             app_id=option.app_id,
-            app_name=APP_NAMES[option.app_id],
+            app_name=_app_name(option.app_id),
             title=f"{option.name} to {destination.label}",
             line_items=[
                 LineItem(label="Base fare", amount_minor=option.base_minor),
@@ -429,10 +456,10 @@ class DemoFoodProvider(_DemoProvider):
             provider_type=self.provider_type,
             provider_label=self.label,
             service_type=self.service_type,
-            option_id=kitchen.app_id,
+            option_id=kitchen.id,
             option_name=kitchen.name,
             app_id=kitchen.app_id,
-            app_name=APP_NAMES[kitchen.app_id],
+            app_name=_app_name(kitchen.app_id),
             title=f"{first}{f' and {more} more' if more else ''} from {kitchen.name}",
             line_items=lines,
             amount_minor=sum(line.amount_minor for line in lines),
@@ -513,16 +540,16 @@ def provider_for(service_type: str, ledger: dict) -> _DemoProvider:
 
 
 def ride_option_ids(enabled_apps: list[str]) -> list[str]:
-    return [option.id for option in RIDE_OPTIONS if option.app_id in enabled_apps]
+    return [option.id for option in RIDE_OPTIONS if _offered(option.app_id, enabled_apps)]
 
 
 def suggest_meals(
     enabled_apps: list[str], vegetarian: bool, mild: bool, budget_minor: int
 ) -> list[tuple[str, str]]:
-    """Up to four (kitchen, dish) suggestions within budget, the cheapest from each app first."""
+    """Up to five (kitchen, dish) suggestions within budget, each kitchen's cheapest first."""
     first, rest = [], []
     for kitchen in KITCHENS:
-        if kitchen.app_id not in enabled_apps:
+        if not _offered(kitchen.app_id, enabled_apps):
             continue
         mains = sorted(
             (
@@ -536,12 +563,12 @@ def suggest_meals(
             key=lambda dish: (dish.price_minor, dish.id),
         )
         for index, dish in enumerate(mains):
-            (first if index == 0 else rest).append((kitchen.app_id, dish))
+            (first if index == 0 else rest).append((kitchen.id, dish))
     # Someone who eats everything sees meat dishes before further vegetarian ones.
     rest.sort(key=lambda pair: (pair[1].vegetarian and not vegetarian, pair[1].price_minor))
     chosen = first + rest[: max(0, MAX_FOOD_OPTIONS - len(first))]
     chosen.sort(key=lambda pair: (pair[1].price_minor, pair[0]))
-    return [(app_id, dish.id) for app_id, dish in chosen]
+    return [(kitchen_id, dish.id) for kitchen_id, dish in chosen]
 
 
 def match_products(message: str) -> list[str]:
@@ -558,9 +585,9 @@ def service_catalogue(enabled_apps: list[str]) -> dict:
                     "id": option.id,
                     "name": option.name,
                     "app_id": option.app_id,
-                    "app_name": APP_NAMES[option.app_id],
+                    "app_name": _app_name(option.app_id),
                     "pickup_min": option.pickup_min,
-                    "enabled": option.app_id in enabled_apps,
+                    "enabled": _offered(option.app_id, enabled_apps),
                 }
                 for option in RIDE_OPTIONS
             ]
@@ -569,10 +596,10 @@ def service_catalogue(enabled_apps: list[str]) -> dict:
             "delivery_fee_minor": FOOD_DELIVERY_FEE,
             "kitchens": [
                 {
-                    "id": kitchen.app_id,
+                    "id": kitchen.id,
                     "name": kitchen.name,
-                    "app_name": APP_NAMES[kitchen.app_id],
-                    "enabled": kitchen.app_id in enabled_apps,
+                    "app_name": _app_name(kitchen.app_id),
+                    "enabled": _offered(kitchen.app_id, enabled_apps),
                     "items": [
                         {
                             "id": dish.id,
