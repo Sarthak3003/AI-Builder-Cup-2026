@@ -1,14 +1,17 @@
 import type { ReactNode } from 'react'
 import { formatINR, formatWhen, paymentMethodLabel } from '../hub'
-import type { Activity, Appointment, CareEvent, Conversation } from '../hub'
-import PickNote from './PickNote'
+import type { Activity, Appointment, CareEvent, Conversation, PlaceSnapshot } from '../hub'
+import FoodTrip from './FoodTrip'
 import PriceLines from './PriceLines'
 import ProviderBadge from './ProviderBadge'
 import RideTrip from './RideTrip'
 import StatusChips from './StatusChips'
 import SummaryView from './SummaryView'
 
-type Props = { item: Activity; events: CareEvent[]; conversation?: Conversation; appointment?: Appointment; actions?: ReactNode; extra?: ReactNode; headerAction?: ReactNode }
+type Props = {
+  item: Activity; events: CareEvent[]; conversation?: Conversation; appointment?: Appointment; actions?: ReactNode; extra?: ReactNode
+  headerAction?: ReactNode; deliverTo?: PlaceSnapshot
+}
 
 function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appointment' | 'actions'>) {
   return (
@@ -17,7 +20,6 @@ function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appoint
       <section className="card">
         <ProviderBadge id={item.app_id ?? item.provider_type} name={item.app_name ?? item.provider_label} />
         <StatusChips item={item} />
-        {item.chosen_by ? <PickNote pick={item.chosen_by} title="Ordered for you by Saathi" /> : null}
         <dl className="receipt-details">
           {item.provider_booking_id ? <div><dt>Booking reference</dt><dd>{item.provider_booking_id} (simulated)</dd></div> : null}
           <div><dt>Provider</dt><dd>{item.provider_label} (simulated)</dd></div>
@@ -47,14 +49,16 @@ function OrderCard({ item, appointment, actions }: Pick<Props, 'item' | 'appoint
   )
 }
 
-export default function ActivityDetailView({ item, events, conversation, appointment, actions, extra, headerAction }: Props) {
+export default function ActivityDetailView({ item, events, conversation, appointment, actions, extra, headerAction, deliverTo }: Props) {
   const timeline = events.filter((event) => event.ref === item.id).slice().reverse()
   return (
     <>
       <a className="back" href="#/activity">Back to activity</a>
       {item.service === 'ride'
         ? <RideTrip item={item} appointment={appointment} actions={actions} headerAction={headerAction} />
-        : <OrderCard item={item} appointment={appointment} actions={actions} />}
+        : item.service === 'food'
+          ? <FoodTrip item={item} deliverTo={deliverTo} actions={actions} headerAction={headerAction} />
+          : <OrderCard item={item} appointment={appointment} actions={actions} />}
       {item.questions?.length ? (
         <section className="card">
           <h2>Questions from the Care Circle</h2>

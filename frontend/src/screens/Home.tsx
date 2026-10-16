@@ -32,7 +32,7 @@ export default function Home({ hub, install }: { hub: Hub; install: ReturnType<t
     <>
       <section className="hero">
         <h1>{words.hello(state.profile.name)}<span className="tagline">{words.tagline}</span></h1>
-        <p className="lead">Need a ride or a meal? Ask Saathi. There is no need to call family, and you always confirm first.</p>
+        <p className="lead">Need a ride or a meal? Ask Saathi. There is no need to call family, and {state.profile.show_options === false ? 'Saathi books the best option for you.' : 'you always confirm first.'}</p>
       </section>
 
       {flow && !flow.completed ? (

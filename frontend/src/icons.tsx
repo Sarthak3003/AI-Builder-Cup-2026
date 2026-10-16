@@ -15,6 +15,7 @@ export const FamilyIcon = () => <Icon><path d="M12 20.5s-8-4.8-8-10.6A4.7 4.7 0 
 export const ProfileIcon = () => <Icon><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.2 3.6-6.5 8-6.5s8 2.3 8 6.5" /></Icon>
 export const CarIcon = () => <Icon size={30}><path d="M5 15.5 6.6 10a2 2 0 0 1 1.9-1.5h7a2 2 0 0 1 1.9 1.5l1.6 5.5" /><rect x="3" y="15.5" width="18" height="4.5" rx="1.5" /><path d="M7 18h.01M17 18h.01" /></Icon>
 export const PhoneIcon = () => <Icon><path d="M6.5 3.5h3l1.5 4.5-2 1.2a11 11 0 0 0 5.8 5.8l1.2-2 4.5 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 4.5 5.7a2 2 0 0 1 2-2.2z" /></Icon>
+export const ScooterIcon = () => <Icon><circle cx="6" cy="17" r="2.5" /><circle cx="18" cy="17" r="2.5" /><path d="M8.5 17h6l2.5-6h-4M15 7h3l1.5 4M6 14.5V11h4" /></Icon>
 export const MealIcon = () => <Icon size={30}><path d="M4 12h16a8 8 0 0 1-16 0z" /><path d="M8 8c0-1.6 1-1.6 1-3.2M12 8c0-1.6 1-1.6 1-3.2M16 8c0-1.6 1-1.6 1-3.2" /></Icon>
 export const MedicineIcon = () => <Icon size={30}><rect x="9" y="3.5" width="6" height="17" rx="2" /><rect x="3.5" y="9" width="17" height="6" rx="2" /></Icon>
 export const MicIcon = () => <Icon><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></Icon>

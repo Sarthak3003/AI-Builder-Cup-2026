@@ -12,6 +12,7 @@ export default function DetailScreen({ hub, id }: { hub: Hub; id: string }) {
   const appointment = state.appointments?.find((entry) => entry.id === item.appointment_id)
   const pending = item.payment?.status === 'PENDING_SIMULATED' && ['CONFIRMED_SIMULATED', 'COMPLETED_SIMULATED'].includes(item.booking_status)
   const ride = item.service === 'ride'
+  const food = item.service === 'food'
   const help = () => void run(async () => { await api('/help', 'POST', { kind: 'help', note: `Help with ${item.title}` }); notify('Your Care Circle was told.') })
   return (
     <ActivityDetailView
@@ -19,11 +20,12 @@ export default function DetailScreen({ hub, id }: { hub: Hub; id: string }) {
       events={state.events ?? []}
       conversation={conversation}
       appointment={appointment}
-      headerAction={ride && live(item) ? <button type="button" className="secondary small" disabled={busy} onClick={help}>Help</button> : null}
+      deliverTo={food ? state.places?.find((place) => place.is_default_pickup) : undefined}
+      headerAction={(ride || food) && live(item) ? <button type="button" className="secondary small" disabled={busy} onClick={help}>Help</button> : null}
       actions={
         <>
-          {live(item) ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/cancel`)}>{ride ? 'Cancel ride' : 'Cancel booking'}</button> : null}
-          {ride && item.booking_status === 'FAILED' ? <a className="primary" href="#/request/ride">Try again</a> : null}
+          {live(item) ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/cancel`)}>{ride ? 'Cancel ride' : food ? 'Cancel order' : 'Cancel booking'}</button> : null}
+          {(ride || food) && item.booking_status === 'FAILED' ? <a className="primary" href={`#/request/${item.service}`}>Try again</a> : null}
           {state.demo_controls && item.booking_status === 'CONFIRMED_SIMULATED' ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/complete`)}>Demo: mark trip or delivery completed</button> : null}
           {state.demo_controls && pending ? <button className="secondary" disabled={busy} onClick={() => call(`/bookings/${id}/payment/complete`)}>Demo: mark simulated payment complete</button> : null}
         </>

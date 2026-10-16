@@ -77,7 +77,7 @@ export default function AskSaathi({ hub, simple = false }: { hub: Hub; simple?: 
         <span className="mic-circle"><MicIcon /></span>
         <span className="mic-label">{listening ? words.listening : words.speak}</span>
       </button>
-      {simple ? null : <p id="ask-example" className="muted">{words.askExample} You always check before anything is booked.</p>}
+      {simple ? null : <p id="ask-example" className="muted">{words.askExample} {state.profile.show_options === false ? 'Saathi books the best ride or meal for you; medicine always asks first.' : 'You always check before anything is booked.'}</p>}
       {gemini ? <p className="chip gemini">{simple ? 'Recording goes to Google' : 'Gemini listens · your recording is sent to Google to understand it'}</p> : null}
 
       <div className="ask-live" aria-live="polite">

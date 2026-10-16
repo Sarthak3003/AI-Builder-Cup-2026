@@ -158,6 +158,40 @@ test('a booked ride reads like a ride app, and every part says it is a demo', as
   expect(screen.getByRole('button', { name: 'Cancel ride' })).toBeInTheDocument()
 })
 
+test('a meal order reads like a food delivery app, and every part says it is a demo', async () => {
+  const ordered = booking(mealQuote())
+  const calls = stubApi({ 'POST /help': () => event({ kind: 'help_requested' }) }, makeState({ activity: [ordered] }))
+  window.location.hash = `#/activity/${ordered.id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { level: 1, name: 'Demo Home Kitchen' })).toBeInTheDocument()
+  expect(screen.getByText(/· 1 item$/)).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Preparing your order' })).toBeInTheDocument()
+  expect(screen.getByText(/^Arrives by about .+ · demo estimate$/)).toBeInTheDocument()
+  expect(document.querySelector('.eta-badge')).toHaveTextContent(/^2[45] mins$/)
+  expect(screen.getByText('Demo map · not live')).toBeInTheDocument()
+  expect(screen.getByText(/· 12 Sample Lane, Demo Nagar \(sample address\)/)).toBeInTheDocument()
+  expect(screen.getByText('Not a real person · picks up when the food is ready')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Call the demo delivery partner' }))
+  expect(screen.getByText('Demo only: there is no delivery partner to call.')).toHaveAttribute('role', 'status')
+  expect(document.querySelector('.order-items')).toHaveTextContent('Vegetable khichdi × 1, vegetarian₹85')
+  expect(screen.getByText('DEMO-FOOD-1042 (simulated)')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Help' }))
+  expect(calls.find((call) => call.url.endsWith('/help'))?.body).toEqual({ kind: 'help', note: 'Help with Vegetable khichdi from Demo Home Kitchen' })
+  expect(screen.getByRole('button', { name: 'Cancel order' })).toBeInTheDocument()
+})
+
+test('a caretaker sees the meal order page without the address, payment or partner call', async () => {
+  const shared = { ...booking(mealQuote()), payment: undefined }
+  stubApi({}, makeCareState(['view_activity'], { activity: [shared] }))
+  window.location.hash = `#/activity/${shared.id}`
+  render(<App />)
+  expect(await screen.findByRole('heading', { name: 'Preparing your order' })).toBeInTheDocument()
+  expect(screen.queryByText('Delivering to')).not.toBeInTheDocument()
+  expect(screen.queryByText(/Payment:/)).not.toBeInTheDocument()
+  expect(screen.getByText('Payment details are not shared with you.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Help' })).not.toBeInTheDocument()
+})
+
 test('the ride page shows no PIN or driver once a ride is over or before it is booked', async () => {
   const done = booking(rideQuote(), 'COMPLETED_SIMULATED')
   const waiting = booking(rideQuote(), 'AWAITING_APPROVAL', { approval_reason: 'Above the ₹100 approval limit.' })
