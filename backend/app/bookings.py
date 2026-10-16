@@ -14,7 +14,13 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.care import add_event
-from app.domain import APPROVAL_TTL_SECONDS, QUOTE_TTL_SECONDS, SERVICE_KEY, ServiceType
+from app.domain import (
+    APPROVAL_TTL_SECONDS,
+    QUOTE_TTL_SECONDS,
+    SERVICE_KEY,
+    ServiceType,
+    rupees,
+)
 from app.onboarding import connected, default_pickup
 from app.providers import (
     APP_NAMES,
@@ -114,6 +120,35 @@ def offer_order(quote: dict) -> tuple:
     return (quote["app_id"] is not None, quote["amount_minor"], quote["option_id"])
 
 
+WAIT_MINOR_PER_MIN = 500
+
+
+def pick_ride(quotes: list[dict]) -> dict:
+    """Saathi's own rule, not AI: the lowest price plus ₹5 for each minute until pickup."""
+    best = min(
+        quotes,
+        key=lambda q: (
+            q["amount_minor"] + WAIT_MINOR_PER_MIN * q["pickup_eta_min"],
+            q["option_id"],
+        ),
+    )
+    cheapest = best["amount_minor"] == min(q["amount_minor"] for q in quotes)
+    quickest = best["pickup_eta_min"] == min(q["pickup_eta_min"] for q in quotes)
+    why = (
+        "Lowest price and shortest wait"
+        if cheapest and quickest
+        else "Lowest price"
+        if cheapest
+        else "Shortest wait"
+        if quickest
+        else "Best balance of price and wait"
+    )
+    price = rupees(best["amount_minor"])
+    reason = f"{why}: {price}, about {best['pickup_eta_min']} min away."
+    best["recommended"] = {"reason": reason, "by": "rules"}
+    return best
+
+
 def _prune(state: dict) -> None:
     # Keep every active quote; drop the oldest used or expired ones beyond the limit.
     spare = len(state["quotes"]) - MAX_QUOTES
@@ -187,6 +222,9 @@ def create_quotes(
             }
         )
     quotes.sort(key=offer_order)
+    if service_type == "RIDE" and len(quotes) > 1:
+        if state["profile"].get("show_ride_options") is False:
+            pick_ride(quotes)
     state["quotes"].extend(quotes)
     _prune(state)
     return {"request_id": request_id, "service_type": service_type, "quotes": quotes}

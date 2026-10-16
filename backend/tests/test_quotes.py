@@ -1,9 +1,11 @@
 """Phase 3: quotes are priced on the server, expire, and never book anything."""
 
+import json
 import time
 
 import pytest
 from fastapi.testclient import TestClient
+from test_assistant import fake_gemini
 
 from app.config import Settings
 from app.main import create_app
@@ -181,6 +183,52 @@ def test_quotes_preview_the_payment_method_and_the_owners_approval_rule(owner):
     assert {q["payment_method"] for q in rides} == {"PAY_ON_COMPLETION"}
     pharmacy = ok(quote(owner, service_type="PHARMACY", items=[{"item_id": "ors"}]))["quotes"][0]
     assert pharmacy["approval"] == {"required": True, "reason": "Pharmacy orders need approval."}
+
+
+def hide_ride_options(api):
+    profile = ok(api.get("/api/hub/state"))["profile"]
+    assert profile["show_ride_options"] is True
+    profile["show_ride_options"] = False
+    ok(api.put("/api/hub/profile", json=profile))
+
+
+def test_with_ride_options_hidden_saathi_picks_one_ride_by_price_and_wait(owner, monkeypatch):
+    monkeypatch.delenv("SAATHI_GEMINI_API_KEY", raising=False)
+    places = set_up(owner)
+    doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
+    assert not any(q.get("recommended") for q in ok(quote(owner, **doctor))["quotes"])
+    hide_ride_options(owner)
+    rides = ok(quote(owner, **doctor))["quotes"]
+    picked = [q for q in rides if q.get("recommended")]
+    assert [q["option_id"] for q in picked] == ["rapido-auto"]
+    assert picked[0]["recommended"] == {
+        "reason": "Lowest price and shortest wait: ₹83, about 3 min away.",
+        "by": "rules",
+    }
+    after = ok(owner.get("/api/hub/state"))
+    assert {q["id"]: q.get("recommended") for q in after["quotes"]}[picked[0]["id"]][
+        "by"
+    ] == "rules"
+    assert after["activity"] == [], "a pick is only a suggestion; nothing is booked"
+    single = ok(quote(owner, **doctor, option_id="uber-go"))["quotes"]
+    assert single[0].get("recommended") is None
+
+
+def test_gemini_can_reweigh_the_pick_and_the_rule_stands_if_it_cannot(owner, monkeypatch):
+    places = set_up(owner)
+    hide_ride_options(owner)
+    doctor = {"service_type": "RIDE", "destination_place_id": places["Doctor"]}
+    sent = fake_gemini(monkeypatch, {"option_id": "demo-ride", "reason": "A car, ₹94, 4 min."})
+    rides = ok(quote(owner, **doctor))["quotes"]
+    picks = {q["option_id"]: q["recommended"] for q in rides if q.get("recommended")}
+    assert picks == {"demo-ride": {"reason": "A car, ₹94, 4 min.", "by": "gemini"}}
+    stored = {q["id"]: q.get("recommended") for q in ok(owner.get("/api/hub/state"))["quotes"]}
+    assert [mark["by"] for mark in stored.values() if mark] == ["gemini"]
+    prompt = json.loads(sent[0].data)["contents"][0]["parts"][0]["text"]
+    assert '"minutes_to_pickup": 3' in prompt and '"price_rupees": 83.0' in prompt
+    fake_gemini(monkeypatch, {"option_id": "helicopter", "reason": "Fastest."})
+    rides = ok(quote(owner, **doctor))["quotes"]
+    assert [q["option_id"] for q in rides if q.get("recommended")] == ["rapido-auto"]
 
 
 def test_expired_quotes_drop_out_of_the_active_list(owner, monkeypatch):

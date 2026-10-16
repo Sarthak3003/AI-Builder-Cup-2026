@@ -3,6 +3,7 @@ export type Profile = {
   vegetarian: boolean; mild: boolean; budget: number; home: string; caregiver_name: string;
   approval_limit: number; caregiver_enabled: boolean; medicines: string[]; enabled_providers: string[];
   sharing?: Sharing; channel?: Channel; read_aloud?: boolean; offer_help?: boolean; payment_method?: PaymentMethod | null;
+  show_ride_options?: boolean;
 }
 export type Channel = 'app' | 'voice' | 'message'
 export type PaymentMethod = 'DEMO_WALLET' | 'PAY_ON_COMPLETION'
@@ -47,6 +48,7 @@ type Offer = {
 export type Quote = Offer & {
   id: string; request_id: string; payment_method: PaymentMethod; approval: { required: boolean; reason: string }; channel: string;
   appointment_id: string | null; status: 'ACTIVE' | 'CONSUMED' | 'EXPIRED'; created_at: number; expires_at: number;
+  recommended?: { reason: string; by: 'rules' | 'gemini' } | null;
 }
 export type QuoteResult = { request_id: string; service_type: ServiceType; quotes: Quote[] }
 export type AskResult = {

@@ -275,6 +275,8 @@ form { display: flex; flex-direction: column; gap: 16px; }
 .price-lines dt { color: var(--text-2); }
 .price-lines .total dt, .price-lines .total dd { font-weight: 700; color: var(--text); }
 .simulation-warning { padding: 12px 14px; border-radius: var(--radius); background: var(--yellow-tint); color: var(--yellow-ink); font-weight: 700; }
+.pick-note { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: var(--radius); background: var(--blue-tint); color: var(--blue-ink); }
+.pick-note .muted { color: var(--blue-ink); font-size: 0.875em; }
 .codes code { font-size: 0.875em; overflow-wrap: anywhere; }
 .switch {
   position: relative; flex: none; width: 60px; height: 36px; padding: 0; border-radius: 999px;

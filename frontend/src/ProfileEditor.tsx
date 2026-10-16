@@ -20,6 +20,10 @@ export default function ProfileEditor({ initial, busy, save }: { initial: Profil
     </fieldset>
     <label>Saved medicine labels (one per line, up to 10)<textarea rows={3} value={draft.medicines.join('\n')} onChange={e => update('medicines', e.target.value.split('\n'))} /></label>
     <p className="muted">Saved labels only. Saathi does not diagnose, suggest doses, validate prescriptions or supply medicine.</p>
+    <fieldset><legend>Booking rides</legend>
+      <label className="check"><input type="checkbox" checked={draft.show_ride_options !== false} onChange={e => update('show_ride_options', e.target.checked)} />Show me the ride options to compare</label>
+      <p className="muted">When this is off, Saathi picks the ride with the best price and pickup time. You still confirm it with one tap.</p>
+    </fieldset>
     <fieldset><legend>Caregiver approvals</legend>
       <label className="check"><input type="checkbox" checked={draft.caregiver_enabled} onChange={e => update('caregiver_enabled', e.target.checked)} />Require caregiver approval above my limit, and for every medicine request</label>
       <div className="form-grid">

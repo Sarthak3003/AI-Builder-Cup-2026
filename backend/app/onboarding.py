@@ -87,6 +87,7 @@ PROFILE_DEFAULTS = {
     "read_aloud": False,
     "offer_help": True,
     "payment_method": None,
+    "show_ride_options": True,
 }
 
 

@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
-from app.assistant import Draft, draft_request, hear_request, summarise_conversation
+from app.assistant import Draft, choose_ride, draft_request, hear_request, summarise_conversation
 from app.assistant import configured as gemini_configured
 from app.bookings import (
     ConfirmIn,
@@ -134,6 +134,8 @@ class Profile(BaseModel):
     read_aloud: bool = False
     offer_help: bool = True
     payment_method: PaymentMethod | None = None
+    # False: Saathi picks one ride and the owner confirms it, instead of comparing a list.
+    show_ride_options: bool = True
 
     @field_validator("enabled_providers")
     @classmethod
@@ -594,7 +596,33 @@ def hub_router(config: Settings):
             record(state, "quoted", result["request_id"])
             return result
 
-        return mutate(who, save, owner_only=True)
+        return ai_pick(who, mutate(who, save, owner_only=True))
+
+    def ai_pick(who, result):
+        """With a Gemini key, Gemini re-weighs Saathi's pick; otherwise the rule's pick stands."""
+        quotes = result["quotes"]
+        if not gemini_configured() or not any(q.get("recommended") for q in quotes):
+            return result
+        try:
+            mutate(who, ai_profile, owner_only=True)
+            pick = choose_ride(quotes)
+        except HTTPException:
+            return result
+        chosen = next((q for q in quotes if q["option_id"] == pick.option_id), None)
+        if not chosen:
+            return result
+        mark = {"reason": pick.reason, "by": "gemini"}
+        for offered in quotes:
+            offered["recommended"] = mark if offered is chosen else None
+        marks = {offered["id"]: offered["recommended"] for offered in quotes}
+
+        def save(state):
+            for stored in state["quotes"]:
+                if stored["id"] in marks:
+                    stored["recommended"] = marks[stored["id"]]
+
+        mutate(who, save, owner_only=True)
+        return result
 
     def remember(
         state,
@@ -786,7 +814,7 @@ def hub_router(config: Settings):
                 "transcript": message,
             }
 
-        return mutate(who, act, owner_only=True)
+        return ai_pick(who, mutate(who, act, owner_only=True))
 
     def next_appointment(state):
         now = time.time()

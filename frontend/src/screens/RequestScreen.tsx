@@ -50,9 +50,12 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
   const serviceType = serviceTypeOf[service]
   const provider = state.services?.find((item) => item.service_type === serviceType)
   const places = state.places ?? []
+  // With the list switched off, Saathi's pick opens directly; the owner still confirms it.
+  const autoPick = service === 'ride' && profile.show_ride_options === false
+  const firstPick = (offered: Quote[]) => (offered.length === 1 ? offered[0] : autoPick ? offered.find((q) => q.recommended) ?? null : null)
   const [handedOver] = useState(() => (state.quotes ?? []).filter((q) => q.request_id === proposalId && q.service === service && q.status === 'ACTIVE'))
   const [quotes, setQuotes] = useState<Quote[]>(handedOver)
-  const [selected, setSelected] = useState<Quote | null>(handedOver.length === 1 ? handedOver[0] : null)
+  const [selected, setSelected] = useState<Quote | null>(() => firstPick(handedOver))
   const [receipt, setReceipt] = useState<Activity | null>(null)
   const [pickupId, setPickupId] = useState(() => places.find((p) => p.is_default_pickup)?.id ?? places[0]?.id ?? '')
   const [destinationId, setDestinationId] = useState('')
@@ -96,7 +99,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
     void run(async () => {
       const result = await api<QuoteResult>('/quotes', 'POST', body)
       setQuotes(result.quotes)
-      setSelected(result.quotes.length === 1 ? result.quotes[0] : null)
+      setSelected(firstPick(result.quotes))
       await refresh()
     })
   }
@@ -106,8 +109,13 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
     // One key per quote: a double tap or a retry after a lost reply cannot book twice.
     const key = (keys.current[selected.id] ??= newId())
     void run(async () => {
-      setReceipt(await api<Activity>(`/quotes/${selected.id}/confirm`, 'POST', { idempotency_key: key, confirmed: true }))
+      const booked = await api<Activity>(`/quotes/${selected.id}/confirm`, 'POST', { idempotency_key: key, confirmed: true })
       await refresh()
+      if (!autoPick || booked.booking_status === 'FAILED') { setReceipt(booked); return }
+      hub.notify(booked.booking_status === 'AWAITING_APPROVAL'
+        ? 'Sent for approval. Nothing is booked or charged yet.'
+        : `Demo booking confirmed: ${booked.provider_booking_id}. No real driver will come and no money moves.`)
+      window.location.hash = `#/activity/${booked.id}`
     })
   }
 
@@ -136,8 +144,8 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
       {step === 'form' && (!provider || provider.status === 'CONNECTED') ? (
         <section className="card" aria-labelledby="form-title">
           <h2 id="form-title" tabIndex={-1} ref={heading} className={simple ? 'sr-only' : 'step-title'}>What would you like?</h2>
-          {simple ? null : <p className="muted">Prices come from the {provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.</p>}
-          {lastGroup.length ? <button type="button" className="secondary wide" onClick={() => { setQuotes(lastGroup); setSelected(lastGroup.length === 1 ? lastGroup[0] : null) }}>Continue where you left off</button> : null}
+          {simple ? null : <p className="muted">{autoPick ? 'Saathi will pick the ride with the best price and pickup time. You confirm it before anything is booked.' : `Prices come from the ${provider?.provider_label ?? 'demo provider'}. Nothing is booked until you confirm.`}</p>}
+          {lastGroup.length ? <button type="button" className="secondary wide" onClick={() => { setQuotes(lastGroup); setSelected(firstPick(lastGroup)) }}>Continue where you left off</button> : null}
           {service === 'ride' && !places.length ? (
             <p className="clarify">Add your home in setup first, so Saathi knows where to pick you up. <a href="#/onboarding/places">Add a place</a></p>
           ) : null}
@@ -183,7 +191,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               </>
             ) : null}
             <button className="primary wide" disabled={busy || (service !== 'ride' && !chosenItems) || (service === 'ride' && !places.length)}>
-              {service === 'ride' ? 'Get demo prices' : 'Get demo price'}
+              {service !== 'ride' ? 'Get demo price' : autoPick ? 'Find the best demo ride' : 'Get demo prices'}
             </button>
           </form>
         </section>
@@ -218,6 +226,12 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
         <section className="review card" aria-labelledby="review-title">
           {simple ? null : <p className="eyebrow">YOU HAVE THE FINAL SAY</p>}
           <h2 id="review-title" tabIndex={-1} ref={heading} className="step-title">{simple ? 'Book this?' : 'Check and confirm'}</h2>
+          {autoPick && selected.recommended ? (
+            <div className="pick-note">
+              <p><strong>Saathi&rsquo;s pick</strong> · {selected.recommended.reason}</p>
+              <p className="muted">{selected.recommended.by === 'gemini' ? 'Chosen by Gemini (AI) from the demo prices.' : 'Chosen by Saathi’s price-and-wait rule (not AI).'}</p>
+            </div>
+          ) : null}
           <ProviderBadge id={selected.app_id ?? selected.provider_type} name={selected.app_name ?? selected.provider_label} />
           <p className="review-name">{selected.title}</p>
           {selected.details?.pickup && selected.details.destination ? <p>{selected.details.pickup.label} → {selected.details.destination.label}</p> : null}
@@ -236,7 +250,8 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
           {selected.approval.required ? <p className="inline-note">Someone in your Care Circle must approve this first. {selected.approval.reason}</p> : null}
           {expired ? <p className="inline-note">This price has expired. Please get a new one.</p> : null}
           <button type="button" className="primary wide" disabled={busy || expired} onClick={confirm}>Confirm demo booking</button>
-          <button type="button" className="secondary wide" disabled={busy} onClick={() => (quotes.length > 1 ? setSelected(null) : startAgain())}>Go back</button>
+          {autoPick && quotes.length > 1 ? <button type="button" className="secondary wide" disabled={busy} onClick={() => setSelected(null)}>Compare all options</button> : null}
+          <button type="button" className="secondary wide" disabled={busy} onClick={() => (quotes.length > 1 && !autoPick ? setSelected(null) : startAgain())}>Go back</button>
           {simple ? null : <button type="button" className="secondary wide" onClick={() => speak(spoken)}>Read aloud</button>}
         </section>
       ) : null}
