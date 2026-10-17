@@ -30,21 +30,21 @@ export default function ActivityScreen({ hub, simple = false }: { hub: Hub; simp
   return (
     <>
       <h1 className="page-title">{t('Your activity', 'आपकी गतिविधि')}</h1>
-      <p className="muted">{t('Rides, meals, medicine requests and plans, whichever way you ask. All bookings and payments are simulated.', 'सवारियाँ, भोजन, दवा अनुरोध और योजनाएँ — आप चाहे जैसे अनुरोध करें। सभी बुकिंग और भुगतान केवल डेमो हैं।')}</p>
+      <p className="muted">{t('Your bookings, requests and upcoming plans.', 'आपकी बुकिंग, अनुरोध और आने वाली योजनाएँ।')}</p>
       <UpcomingPlans runner={hub} appointments={state.appointments ?? []} reminders={state.reminders ?? []} canEdit canMarkDone canMedicine />
       <h2 className="section-title">{t('History', 'पिछली गतिविधियाँ')}</h2>
       <PhoneHistory conversations={state.conversations ?? []} />
-      <ActivityFilters filters={filters} onChange={setFilters} />
+      <details className="settings-group"><summary>{t('Filter history', 'गतिविधियाँ छाँटें')}</summary><ActivityFilters filters={filters} onChange={setFilters} /></details>
       <ActivityList
         items={shown}
         actions={cancel}
         empty={state.activity.length ? <p>{t('Nothing matches these filters.', 'इन फ़िल्टर से मेल खाती कोई गतिविधि नहीं है।')}</p> : <><h2>{t('A fresh start', 'एक नई शुरुआत')}</h2><p>{t('Your first request will appear here.', 'आपका पहला अनुरोध यहाँ दिखाई देगा।')}</p><a className="primary" href="#/">{t('Explore services', 'सेवाएँ देखें')}</a></>}
       />
-      <section className="card" aria-labelledby="timeline-title">
+      <details className="settings-group"><summary>{t('Timeline', 'घटनाक्रम')}</summary><section className="card" aria-labelledby="timeline-title">
         <h2 id="timeline-title">{t('Timeline', 'घटनाक्रम')}</h2>
         <p className="muted">{t('The same record your Care Circle sees, minus anything you have not shared with them.', 'आपकी देखभाल मंडली यही रिकॉर्ड देखती है, लेकिन वह जानकारी नहीं जो आपने उनके साथ साझा नहीं की है।')}</p>
         <ActivityTimeline events={state.events ?? []} />
-      </section>
+      </section></details>
       <details className="audit">
         <summary>{t('Who did what', 'किसने क्या किया')}</summary>
         <ul>

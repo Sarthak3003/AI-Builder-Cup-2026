@@ -19,7 +19,7 @@ test('a brand-new person is taken to setup once, step 1 of 7, with the demo expl
   expect(window.location.hash).toBe('#/onboarding')
   expect(screen.getByText('Step 1 of 7')).toBeInTheDocument()
   expect(screen.getByRole('progressbar', { name: 'Setup progress' })).toHaveAttribute('aria-valuenow', '1')
-  expect(screen.getByText(/Every provider, booking and payment here is simulated/)).toBeInTheDocument()
+  expect(screen.getByText(/Preview only: no real bookings or payments/)).toBeInTheDocument()
   expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: 'What should Saathi call you?' })).toHaveValue('')
 })
@@ -83,6 +83,7 @@ test('Save and exit persists the setup booking preference for Profile', async ()
   expect(await screen.findByRole('heading', { name: 'Finish setting up Saathi' })).toBeInTheDocument()
   expect(sent(calls, 'PATCH', '/onboarding/profile')[0]).toEqual(expect.objectContaining({ show_options: false }))
   await userEvent.click(screen.getByRole('link', { name: 'Open profile' }))
+  await userEvent.click(await screen.findByRole('button', { name: /Booking preferences/ }))
   expect(await screen.findByRole('radio', { name: 'Let Saathi choose the best option and book it for me' })).toBeChecked()
 })
 
@@ -212,7 +213,7 @@ test('save and exit keeps progress and Home offers to continue, with services ma
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   expect(screen.getByText(/2 of 7 steps done\. Next: Saved places\./)).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Continue setup' })).toHaveAttribute('href', '#/onboarding')
-  expect(screen.getByRole('link', { name: /Book a ride\s*Setup required: connect the Demo Ride Provider/ })).toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /Book a ride\s*Set up service/ })).toBeInTheDocument()
   expect(sent(calls, 'POST', '/onboarding/steps/places')).toEqual([{}])
 })
 
@@ -220,6 +221,7 @@ test('a finished setup can be edited later from Profile', async () => {
   stubApi()
   window.location.hash = '#/profile'
   render(<App />)
+  await userEvent.click(await screen.findByText('Places, payment & setup'))
   expect(await screen.findByRole('heading', { name: 'Your setup' })).toBeInTheDocument()
   expect(screen.getByText(/2 saved, usual pickup: Home/)).toBeInTheDocument()
   expect(screen.getByText(/Demo wallet \(simulated\)/)).toBeInTheDocument()

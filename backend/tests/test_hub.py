@@ -34,6 +34,28 @@ def enable_care(client):
     return client.post("/api/hub/caregiver/invite").json()["code"]
 
 
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize(
+    "message,reply",
+    [
+        ("Can you help me with something?", {"service": "food"}),
+        ("मुझे मदद चाहिए", {"service": "food"}),
+        ("Something suitable please", {"service": None}),
+        ("Please arrange something", {"service": "food", "clarification": "What meal?"}),
+    ],
+)
+def test_unclear_ai_requests_never_quote_or_auto_book(
+    client, monkeypatch, automatic, message, reply
+):
+    fake_gemini(monkeypatch, reply)
+    ok(client.patch("/api/hub/onboarding/profile", json={"show_options": not automatic}))
+    result = ok(client.post("/api/hub/ask", json={"id": str(uuid4()), "message": message}))
+    assert result["status"] == "needs_details" and result["clarification"]
+    assert result["quotes"] == [] and not result.get("booking")
+    saved = ok(client.get("/api/hub/state"))
+    assert not saved["quotes"] and not saved["activity"]
+
+
 @pytest.mark.parametrize("service", ["food", "ride", "medicine"])
 def test_all_services_persist_and_cancel(client, service):
     quote = quotes(client, service)[0]

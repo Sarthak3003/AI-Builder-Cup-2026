@@ -110,13 +110,41 @@ export type CareState = {
   demo_people?: DemoPerson[]; demo_person?: string; demo_controls?: boolean;
 }
 
-export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+class ApiError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) { super(message); this.status = status }
+}
+
+async function send<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api/hub${path}`, { method, credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(35000) })
   const data = await response.json()
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Please check the form and try again.')
+  if (!response.ok) throw new ApiError(typeof data.detail === 'string' ? data.detail : 'Please check the form and try again.', response.status)
   return data as T
+}
+
+export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  try { return await send<T>(path, method, body) } catch (error) {
+    const quote = method === 'POST' && path.match(/^\/quotes\/([^/]+)\/confirm$/)
+    const booking = method === 'POST' && path.match(/^\/bookings\/([^/]+)\/(cancel|complete|payment\/complete)$/)
+    if ((!quote && !booking) || (error instanceof ApiError && error.status < 500)) throw error
+    // A lost response does not mean the write failed. Read once; never resend a mutation.
+    try {
+      if (quote) {
+        const snapshot = await send<HubState>('/snapshot')
+        const saved = snapshot.activity.find((item) => item.quote_id === quote[1])
+        if (saved) return saved as T
+      } else if (booking) {
+        const saved = await send<Activity>(`/bookings/${booking[1]}`)
+        const completed = booking[2] === 'cancel' ? saved.booking_status === 'CANCELLED_SIMULATED'
+          : booking[2] === 'complete' ? saved.booking_status === 'COMPLETED_SIMULATED'
+            : saved.payment?.status === 'SUCCEEDED_SIMULATED'
+        if (completed) return saved as T
+      }
+    } catch { /* The outcome remains unknown if reconciliation also fails. */ }
+    throw new Error('The result could not be confirmed. Check Activity before trying again; your request may already have completed.')
+  }
 }
 export const bookingStatusLabel: Record<BookingStatus, string> = {
   AWAITING_APPROVAL: 'Waiting for approval · not booked yet', CONFIRMED_SIMULATED: 'Booked · simulated', COMPLETED_SIMULATED: 'Completed · simulated',

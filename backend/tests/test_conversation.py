@@ -92,6 +92,85 @@ def test_initial_food_intent_and_precomputed_draft_use_updated_state(account, no
         assert not account["activity"]
 
 
+@pytest.mark.parametrize(
+    "language,question",
+    [
+        ("en-IN", "What would you like to eat?"),
+        ("hi-IN", "आप क्या खाना चाहेंगे?"),
+    ],
+)
+def test_phone_clarification_waits_then_requires_confirmation(account, language, question):
+    session = new_session("phone", language=language)
+    engine = ConversationEngine()
+    turn = Turn(event_id=uuid4().hex, message="Something suitable for me")
+    result = engine.process(
+        account,
+        session,
+        turn,
+        draft=assistant.Draft(
+            service="food",
+            budget=150,
+            clarification=question,
+        ),
+    )
+    assert result["reply"] == question
+    assert result["state"] == "COLLECTING_DETAILS"
+    assert session["draft"]["budget"] == 150
+    assert not account["quotes"] and not account["activity"]
+    assert engine.process(account, session, turn) == result
+    options = say(account, session, "vegetarian and mild")
+    assert options["state"] == "PRESENTING_OPTIONS"
+    assert session["draft"]["budget"] == 150
+    assert say(account, session, "one")["state"] == "AWAITING_CONFIRMATION"
+    assert not account["activity"]
+    assert say(account, session, "yes")["state"] == "COMPLETED"
+    assert len(account["activity"]) == 1
+
+
+def test_phone_clarification_invalidates_old_offer(account):
+    session = new_session("phone")
+    say(account, session, "Order vegetarian food under 150")
+    say(account, session, "one")
+    old_ids = session["quote_ids"][:]
+    result = ConversationEngine().process(
+        account,
+        session,
+        Turn(event_id=uuid4().hex, message="Actually change my meal"),
+        draft=assistant.Draft(service="food", clarification="Which meal?"),
+    )
+    assert result["reply"] == "Which meal?" and session["pending"] is None
+    assert all(q["status"] == "EXPIRED" for q in account["quotes"] if q["id"] in old_ids)
+    say(account, session, "yes")
+    assert not account["activity"]
+
+
+def test_unknown_phone_service_and_contextual_answer(account, monkeypatch):
+    engine = ConversationEngine()
+    session = new_session("phone")
+    result = engine.process(
+        account,
+        session,
+        Turn(event_id=uuid4().hex, message="Something please"),
+        draft=assistant.Draft(service=None),
+    )
+    assert result["reply"] and not account["quotes"]
+    seen = []
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+
+    def draft(message, profile, **kwargs):
+        seen.append(message)
+        return assistant.Draft(service="ride", destination="Doctor")
+
+    monkeypatch.setattr(assistant, "draft_request", draft)
+    turn = Turn(event_id=uuid4().hex, message="A ride to Doctor")
+    answer = engine.prepare(account, session, turn)
+    assert "previous_question" in seen[0] and "A ride to Doctor" in seen[0]
+    result = engine.process(account, session, turn, draft=answer)
+    assert session["waiting_for"] == "pickup"
+    assert say(account, session, "Home")["state"] == "AWAITING_CONFIRMATION"
+    assert not account["activity"]
+
+
 def test_ambiguous_meal_preferences_do_not_switch_to_medicine(account):
     session = new_session("phone")
     say(account, session, "Order dinner")

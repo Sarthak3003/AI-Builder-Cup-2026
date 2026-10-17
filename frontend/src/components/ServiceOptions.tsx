@@ -22,14 +22,13 @@ export default function ServiceOptions({ hub, service }: { hub: Hub; service: De
     setState(await api<HubState>(`/services/${service.service_type}/options`, 'POST', { option_id: id, enabled, consent: true }))
   })
   return (
-    <section className="service-options" aria-labelledby={title}>
-      <h2 id={title}>{text(titles[service.service_type])}</h2>
+    <details className="settings-group service-options" name="service-category">
+      <summary id={title}>{text(titles[service.service_type])}<span className="category-count">{t('{{count}} active', '{{count}} चालू', { count: options.filter(option => option.enabled).length })}</span></summary>
       <ul className="service-option-list" aria-label={t('{{service}} services', '{{service}} सेवाएँ', { service: text(titles[service.service_type]) })}>
         {options.map((option) => (
           <li key={option.id} className={`service-option-row${option.enabled ? ' selected' : ''}`}>
             <div className="service-option-info">
               <ProviderBadge id={option.badge} name={text(option.name)} demo={false} />
-              <span className="muted service-option-note">{t('Simulated', 'सिम्युलेटेड')}</span>
             </div>
             <button type="button" role="switch" aria-checked={option.enabled} aria-label={t('Use {{name}}', '{{name}} इस्तेमाल करें', { name: text(option.name) })} className={option.enabled ? 'switch on' : 'switch'} disabled={busy} onClick={() => toggle(option.id, !option.enabled)}>
               <span className="knob" />
@@ -38,6 +37,6 @@ export default function ServiceOptions({ hub, service }: { hub: Hub; service: De
           </li>
         ))}
       </ul>
-    </section>
+    </details>
   )
 }

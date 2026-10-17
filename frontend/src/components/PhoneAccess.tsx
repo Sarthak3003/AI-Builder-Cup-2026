@@ -20,7 +20,6 @@ export default function PhoneAccess({ hub }: { hub: Hub }) {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [pairing])
-  if (!phone) return null
   const generate = () => void hub.run(async () => {
     setPairing(await api<Pairing>('/phone/pairing-codes', 'POST', { retain_transcript: retain }))
     setNow(Date.now() / 1000)
@@ -29,7 +28,7 @@ export default function PhoneAccess({ hub }: { hub: Hub }) {
     <section className="card" aria-labelledby="phone-access-title">
       <h2 id="phone-access-title">{t('Call Saathi', 'साथी को कॉल करें')}</h2>
       <p>{t('Call from a telephone and enter a one-use code to connect to this profile. Caller ID alone never gives access.', 'इस प्रोफ़ाइल से जुड़ने के लिए फ़ोन से कॉल करें और एक बार इस्तेमाल होने वाला कोड डालें। केवल कॉलर आईडी से कभी पहुँच नहीं मिलती।')}</p>
-      {phone.enabled ? (
+      {phone?.enabled ? (
         <>
           {phone.number ? <a className="primary wide" href={`tel:${phone.number}`}>{t('Call {{number}}', '{{number}} पर कॉल करें', { number: phone.number })}</a> : <p className="inline-note">{t('Ask the organiser for the configured Twilio number.', 'तय किया गया Twilio नंबर आयोजक से पूछें।')}</p>}
           <label className="check-row"><input type="checkbox" checked={retain} onChange={(event) => setRetain(event.target.checked)} />{t('Save a redacted text transcript for this call', 'इस कॉल की लिखित बातचीत संवेदनशील जानकारी हटाकर सहेजें')}</label>
@@ -44,7 +43,7 @@ export default function PhoneAccess({ hub }: { hub: Hub }) {
             </div>
           ) : null}
         </>
-      ) : <p className="inline-note">{t('Telephone calling is not enabled on this server yet. Twilio credentials and a configured number are needed. This is not a call simulator.', 'इस सर्वर पर फ़ोन कॉल अभी चालू नहीं है। Twilio के क्रेडेंशियल और एक कॉन्फ़िगर किया हुआ नंबर चाहिए। यह कॉल सिम्युलेटर नहीं है।')}</p>}
+      ) : <p className="inline-note">{t('Telephone calling is not enabled on this server yet. Twilio credentials and a configured number are needed.', 'इस सर्वर पर फ़ोन कॉल अभी चालू नहीं है। Twilio के क्रेडेंशियल और एक कॉन्फ़िगर किया हुआ नंबर चाहिए।')}</p>}
       <button type="button" className="secondary wide" disabled={hub.busy} onClick={() => void hub.run(async () => {
         await api('/phone/revoke', 'POST', {})
         setPairing(null)

@@ -14,13 +14,15 @@ export default function PlacesEditor({ hub }: { hub: Hub }) {
   const { state, busy, run, setState } = hub
   const places = state.places ?? []
   const [draft, setDraft] = useState<Draft>(places.length ? blank : { ...blank, label: 'Home' })
+  const [formOpen, setFormOpen] = useState(true)
   const editing = places.find((place) => place.id === draft.id)
   const samples = (state.sample_places ?? []).filter((sample) => !places.some((place) => place.label.toLowerCase() === sample.label.toLowerCase()))
   const send = (body: Draft, after?: () => void) => void run(async () => {
     setState(await api<HubState>('/onboarding/locations', 'POST', body))
     after?.()
+    hub.notify(t('Place saved. Your saved places are up to date.', 'जगह सहेजी गई। सहेजी गई जगहों की सूची अपडेट है।'))
   })
-  const edit = (place: Place) => setDraft({ id: place.id, label: place.label, address: place.address, notes: place.notes, is_default_pickup: place.is_default_pickup })
+  const edit = (place: Place) => { setFormOpen(true); setDraft({ id: place.id, label: place.label, address: place.address, notes: place.notes, is_default_pickup: place.is_default_pickup }) }
 
   return (
     <>
@@ -42,6 +44,7 @@ export default function PlacesEditor({ hub }: { hub: Hub }) {
                 <button type="button" className="secondary small" disabled={busy} onClick={() => void run(async () => {
                   setState(await api<HubState>(`/onboarding/locations/${place.id}`, 'DELETE'))
                   if (draft.id === place.id) setDraft(blank)
+                  hub.notify(t('Place removed.', 'जगह हटा दी गई।'))
                 })}>{t('Remove {{place}}', '{{place}} हटाएँ', { place: place.label })}</button>
               </div>
             </li>
@@ -49,7 +52,8 @@ export default function PlacesEditor({ hub }: { hub: Hub }) {
         </ul>
       ) : <p className="muted">{t('No places yet. Start with your home.', 'अभी कोई जगह नहीं है। अपने घर से शुरू करें।')}</p>}
 
-      <form className="inline-form place-form" aria-labelledby="place-form-title" onSubmit={(event) => { event.preventDefault(); send(draft, () => setDraft(blank)) }}>
+      {formOpen ? <form className="inline-form place-form" aria-labelledby="place-form-title" onSubmit={(event) => { event.preventDefault(); send(draft, () => { setDraft(blank); setFormOpen(false) }) }}>
+        <fieldset className="save-fields" disabled={busy}>
         <h2 id="place-form-title" className="section-title">{editing ? t('Change {{place}}', '{{place}} बदलें', { place: editing.label }) : t('Add a place', 'जगह जोड़ें')}</h2>
         <div className="preset-row" role="group" aria-label={t('Quick names', 'तुरंत नाम चुनें')}>
           {presets.map((preset) => (
@@ -69,7 +73,7 @@ export default function PlacesEditor({ hub }: { hub: Hub }) {
           <input type="checkbox" checked={draft.is_default_pickup || !places.length} disabled={!places.length} onChange={(event) => setDraft({ ...draft, is_default_pickup: event.target.checked })} />
           {t('Use as my usual pickup', 'मेरे सामान्य पिकअप के रूप में इस्तेमाल करें')}
         </label>
-        <button className="primary wide" disabled={busy}>{editing ? t('Save changes', 'बदलाव सहेजें') : t('Save place', 'जगह सहेजें')}</button>
+        <button className="primary wide" disabled={busy}>{busy ? t('Saving place…', 'जगह सहेजी जा रही है…') : editing ? t('Save changes', 'बदलाव सहेजें') : t('Save place', 'जगह सहेजें')}</button>
         {editing ? <button type="button" className="secondary wide" onClick={() => setDraft(blank)}>{t('Cancel changes', 'बदलाव रद्द करें')}</button> : null}
         {samples.length && !editing ? (
           <div className="samples">
@@ -81,7 +85,8 @@ export default function PlacesEditor({ hub }: { hub: Hub }) {
             </div>
           </div>
         ) : null}
-      </form>
+        </fieldset>
+      </form> : <button type="button" className="secondary wide" disabled={busy} onClick={() => setFormOpen(true)}>{t('Add another place', 'एक और जगह जोड़ें')}</button>}
     </>
   )
 }

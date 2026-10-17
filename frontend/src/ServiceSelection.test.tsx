@@ -16,13 +16,14 @@ test.each(['#/onboarding/services', '#/services'])('%s lists demo and familiar s
     ['Rides', ['Demo Ride Provider', 'Uber', 'Ola', 'Rapido']],
     ['Food delivery', ['Demo Food Provider', 'Uber Eats', 'Swiggy', 'Zomato']],
   ] as const) {
+    await userEvent.click(await screen.findByText(category, { selector: 'summary' }))
     const list = await screen.findByRole('list', { name: `${category} services` })
     const rows = within(list).getAllByRole('listitem')
     expect(rows).toHaveLength(4)
     names.forEach((name, index) => {
       expect(rows[index]).toHaveClass('service-option-row')
       expect(within(rows[index]).getByText(name)).toBeVisible()
-      expect(within(rows[index]).getByText('Simulated')).toBeVisible()
+      expect(within(rows[index]).queryByText('Simulated')).not.toBeInTheDocument()
       expect(within(rows[index]).getByRole('switch', { name: `Use ${name}` })).not.toBeChecked()
     })
   }
@@ -47,6 +48,7 @@ test.each([
   }, saved)
   window.location.hash = '#/onboarding/services'
   const { unmount } = render(<App />)
+  await userEvent.click(await screen.findByText(serviceType === 'RIDE' ? 'Rides' : 'Food delivery', { selector: 'summary' }))
   await userEvent.click(await screen.findByRole('switch', { name: `Use ${name}` }))
   expect(screen.getByRole('switch', { name: `Use ${name}` })).toBeChecked()
   expect(calls.filter((call) => call.url.includes('/services/'))).toEqual([
@@ -55,6 +57,7 @@ test.each([
   if (!own) expect(screen.getByRole('switch', { name: `Use ${serviceType === 'RIDE' ? 'Demo Ride Provider' : 'Demo Food Provider'}` })).not.toBeChecked()
   unmount()
   render(<App />)
+  await userEvent.click(await screen.findByText(serviceType === 'RIDE' ? 'Rides' : 'Food delivery', { selector: 'summary' }))
   expect(await screen.findByRole('switch', { name: `Use ${name}` })).toBeChecked()
 })
 
@@ -62,6 +65,7 @@ test('a failed save does not switch a service on', async () => {
   stubApi({ 'POST /services/RIDE/options': () => fail(503, { detail: 'Could not save services.' }) }, setup())
   window.location.hash = '#/services'
   render(<App />)
+  await userEvent.click(await screen.findByText('Rides', { selector: 'summary' }))
   await userEvent.click(await screen.findByRole('switch', { name: 'Use Uber' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not save services.')
   expect(screen.getByRole('switch', { name: 'Use Uber' })).not.toBeChecked()

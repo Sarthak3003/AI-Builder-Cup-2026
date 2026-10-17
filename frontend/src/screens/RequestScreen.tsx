@@ -207,7 +207,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
               </>
             ) : null}
             <button className="primary wide" disabled={busy || (service !== 'ride' && !chosenItems) || (service === 'ride' && !places.length)}>
-              {text(service === 'ride' ? (autoPick ? 'Book the best demo ride' : 'Get demo prices') : autoPick ? 'Order now' : 'Get demo price')}
+              {text(service === 'ride' ? (autoPick ? 'Book the best demo ride' : 'See prices') : autoPick ? 'Order now' : 'Get demo price')}
             </button>
           </form>
         </section>
@@ -260,7 +260,7 @@ export default function RequestScreen({ hub, service, proposalId, simple = false
           <p className="simulation-warning">{text(selected.notice)}</p>
           {selected.approval.required ? <p className="inline-note">{t('Someone in your Care Circle must approve this first.', 'पहले आपके केयर सर्कल में किसी को इसकी मंज़ूरी देनी होगी।')} {bookingCopy(selected.approval.reason, t, text)}</p> : null}
           {expired ? <p className="inline-note">{text('This price has expired. Please get a new one.')}</p> : null}
-          <button type="button" className="primary wide" disabled={busy || expired} onClick={confirm}>{text('Confirm demo booking')}</button>
+          <button type="button" className="primary wide" disabled={busy || expired} onClick={confirm}>{text('Confirm booking')}</button>
           {autoPick && quotes.length > 1 ? <button type="button" className="secondary wide" disabled={busy} onClick={() => setSelected(null)}>{text('Compare all options')}</button> : null}
           <button type="button" className="secondary wide" disabled={busy} onClick={() => (quotes.length > 1 && !autoPick ? setSelected(null) : startAgain())}>{text('Go back')}</button>
           {simple ? null : <button type="button" className="secondary wide" onClick={() => speak(spoken)}>{text('Read aloud')}</button>}
@@ -327,7 +327,7 @@ function Receipt({ hub, receipt, simple, onAgain }: { hub: Hub; receipt: Activit
       {simple ? <a className="primary wide" href="#/">{text('Done')}</a> : (
         <>
           <p className="reassure">{text(waiting ? 'No need to call anyone.' : 'That is it. There was no need to call anyone.')}</p>
-          <a className="primary wide" href={`#/activity/${receipt.id}`}>{text(receipt.service === 'ride' && !waiting ? 'Track your demo ride' : 'See booking details')}</a>
+          <a className="primary wide" href={`#/activity/${receipt.id}`}>{text(receipt.service === 'ride' && !waiting ? 'Track ride' : 'See booking details')}</a>
           <button type="button" className="secondary wide" onClick={onAgain}>{text('Book something else')}</button>
         </>
       )}

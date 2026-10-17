@@ -56,12 +56,9 @@ function WelcomeStep({ hub, nav }: StepProps) {
   const save = () => saveStep(hub, '/onboarding/profile', 'PATCH', { step: 'welcome', name, language })
   return (
     <form onSubmit={submitter(hub, nav, save)}>
-      <p className="lead">{t('Saathi helps you get a ride, a meal or everyday pharmacy items by asking in your own words. During setup, choose whether to compare ride and meal prices yourself or let Saathi choose and book for you.', 'अपने शब्दों में कहकर साथी की मदद से सवारी, भोजन या रोज़मर्रा की फ़ार्मेसी की चीज़ें पाएँ। सेटअप में चुनें कि सवारी और भोजन की कीमतें खुद देखेंगे या साथी को अपने लिए चुनने और बुक करने देंगे।')}</p>
-      <div className="card demo-note">
-        <h2>{t('This is a demo', 'यह एक डेमो है')}</h2>
-        <p>{t('Every provider, booking and payment here is simulated. No real driver, order or money is involved.', 'यहाँ हर सेवा प्रदाता, बुकिंग और भुगतान सिम्युलेटेड है। कोई असली ड्राइवर, ऑर्डर या पैसा शामिल नहीं है।')}</p>
-      </div>
-      <p className="muted">{t('No sign-in is needed for this demo. Each answer is saved to this browser’s demo session as you go, so you can stop and come back later.', 'इस डेमो के लिए साइन-इन की ज़रूरत नहीं है। आगे बढ़ते समय हर जवाब इस ब्राउज़र के डेमो सत्र में सहेजा जाता है, इसलिए आप रुककर बाद में लौट सकते हैं।')}</p>
+      <p className="lead">{t('A few details to make Saathi yours.', 'साथी को अपना बनाने के लिए कुछ जानकारी दें।')}</p>
+      <p className="muted">{t('No sign-in needed. Your progress is saved in this browser.', 'साइन-इन की ज़रूरत नहीं। आपकी प्रगति इस ब्राउज़र में सहेजी जाती है।')}</p>
+      <p className="muted">{t('Preview only: no real bookings or payments.', 'केवल पूर्वावलोकन: कोई वास्तविक बुकिंग या भुगतान नहीं।')}</p>
       <label className="field"><span>{t('What should Saathi call you?', 'साथी आपको किस नाम से बुलाए?')}</span>
         <input required maxLength={60} autoComplete="given-name" value={name} onChange={(event) => setName(event.target.value)} />
       </label>

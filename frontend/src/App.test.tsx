@@ -22,23 +22,111 @@ const quoted = (quotes: Quote[]) => ({ request_id: quotes[0].request_id, service
 const confirmCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.url.endsWith('/confirm'))
 const quoteCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.method === 'POST' && call.url.endsWith('/quotes'))
 
-test('home greets the user, shows which apps each card compares, and the live status', async () => {
+test('Profile starts with categories and preserves drafts while moving between them', async () => {
+  const calls = stubApi()
+  window.location.hash = '#/profile'
+  render(<App />)
+  const personal = await screen.findByRole('button', { name: /Personal details/ })
+  expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Save preferences' })).not.toBeInTheDocument()
+  await userEvent.click(personal)
+  const name = screen.getByRole('textbox', { name: 'Your name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Draft name')
+  expect(screen.queryByRole('spinbutton', { name: 'Default budget (₹)' })).not.toBeInTheDocument()
+  expect(personal).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.queryByRole('button', { name: 'Back to preferences' })).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /Food & budget/ }))
+  expect(screen.getByRole('spinbutton', { name: 'Default budget (₹)' })).toBeInTheDocument()
+  expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
+  expect(personal).toHaveAttribute('aria-expanded', 'false')
+  await userEvent.click(screen.getByRole('button', { name: /Personal details/ }))
+  expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('Draft name')
+  await userEvent.click(personal)
+  expect(personal).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
+  expect(calls.some(call => call.method === 'PUT')).toBe(false)
+})
+
+test('preferences show progress, close after saving and reopen with saved values', async () => {
+  let complete!: (value: ReturnType<typeof makeState>) => void
+  const saved = makeState({ profile: { ...makeState().profile, name: 'Meera' } })
+  stubApi({ 'PUT /profile': () => new Promise(resolve => { complete = resolve }) })
+  window.location.hash = '#/profile'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: /Personal details/ }))
+  const name = await screen.findByRole('textbox', { name: 'Your name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Meera')
+  await userEvent.click(screen.getByRole('button', { name: 'Save preferences' }))
+  expect(screen.getByRole('button', { name: 'Saving preferences…' })).toBeDisabled()
+  expect(name).toBeDisabled()
+  expect(screen.getByText('Working on it…')).toBeInTheDocument()
+  await act(async () => complete(saved))
+  expect(await screen.findByRole('heading', { name: 'Preferences saved' })).toHaveFocus()
+  expect(screen.queryByRole('textbox', { name: 'Your name' })).not.toBeInTheDocument()
+  expect(screen.queryByText('Working on it…')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit preferences' }))
+  await userEvent.click(screen.getByRole('button', { name: /Personal details/ }))
+  expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('Meera')
+})
+
+test('failed preference save keeps the draft editable and shows no saved summary', async () => {
+  stubApi({ 'PUT /profile': () => fail(503, { detail: 'Save unavailable. Please retry.' }) })
+  window.location.hash = '#/profile'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: /Personal details/ }))
+  const name = await screen.findByRole('textbox', { name: 'Your name' })
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Unsaved name')
+  await userEvent.click(screen.getByRole('button', { name: 'Save preferences' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Save unavailable')
+  expect(name).toHaveValue('Unsaved name')
+  expect(name).toBeEnabled()
+  expect(screen.queryByRole('heading', { name: 'Preferences saved' })).not.toBeInTheDocument()
+})
+
+test('an older background refresh cannot overwrite newly saved preferences', async () => {
+  let completeSnapshot!: (value: ReturnType<typeof makeState>) => void
+  const before = makeState()
+  stubApi({
+    'GET /snapshot': () => new Promise(resolve => { completeSnapshot = resolve }),
+    'PUT /profile': body => makeState({ profile: body as Profile }),
+  }, before)
+  window.location.hash = '#/profile'
+  render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: /Personal details/ }))
+  const name = await screen.findByRole('textbox', { name: 'Your name' })
+  act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+  await waitFor(() => expect(completeSnapshot).toBeTypeOf('function'))
+  await userEvent.clear(name)
+  await userEvent.type(name, 'Latest name')
+  await userEvent.click(screen.getByRole('button', { name: 'Save preferences' }))
+  await screen.findByRole('heading', { name: 'Preferences saved' })
+  await act(async () => completeSnapshot(before))
+  expect(screen.getByText('Latest name')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit preferences' }))
+  await userEvent.click(screen.getByRole('button', { name: /Personal details/ }))
+  expect(screen.getByRole('textbox', { name: 'Your name' })).toHaveValue('Latest name')
+})
+
+test('home shows concise service actions and connection details', async () => {
   stubApi()
   render(<App />)
   expect(await screen.findByText('Hello, Friend.')).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: /Book a ride\s*Demo Ride Provider · Uber · Ola · Rapido \(demo\)/ })).toHaveAttribute('href', '#/request/ride')
-  expect(screen.getByRole('link', { name: /Order food\s*Demo Food Provider · Uber Eats · Swiggy · Zomato \(demo\)/ })).toHaveAttribute('href', '#/request/food')
+  expect(screen.getByRole('link', { name: /Book a ride\s*Choose your destination/ })).toHaveAttribute('href', '#/request/ride')
+  expect(screen.getByRole('link', { name: /Order food\s*Find a meal you like/ })).toHaveAttribute('href', '#/request/food')
   expect(screen.getByRole('link', { name: /Medicine request/ })).toHaveAttribute('href', '#/request/medicine')
-  expect(screen.getByText(/no need to call family/i)).toBeInTheDocument()
+  expect(screen.getByText(/What can we help you with today/)).toBeInTheDocument()
   expect(await screen.findByText('Backend connected · v0.1.0')).toBeInTheDocument()
 })
 
-test('apps the user turned off disappear from the home cards', async () => {
+test('home service actions do not depend on provider marketing names', async () => {
   const state = makeState()
   state.profile.enabled_providers = state.profile.enabled_providers.filter((id) => id !== 'uber')
   stubApi({}, state)
   render(<App />)
-  expect(await screen.findByRole('link', { name: /Book a ride\s*Demo Ride Provider · Ola · Rapido \(demo\)/ })).toBeInTheDocument()
+  expect(await screen.findByRole('link', { name: /Book a ride\s*Choose your destination/ })).toBeInTheDocument()
 })
 
 type Heard = { results: ArrayLike<{ isFinal?: boolean; 0: { transcript: string } }> }
@@ -160,7 +248,7 @@ test('with Gemini on, the microphone records, Gemini hears and routes it, and no
     'GET /state': () => makeState({ gemini: true, quotes: rides() }),
   }, makeState({ gemini: true }))
   render(<App />)
-  expect(await screen.findByText(/Gemini listens · your recording is sent to Google/)).toBeInTheDocument()
+  expect(await screen.findByText(/Voice recordings are sent to Google/)).toBeInTheDocument()
 
   await userEvent.click(screen.getByRole('button', { name: 'Tap and speak' }))
   expect(FakeRecorder.last?.state).toBe('recording')
@@ -227,7 +315,7 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
   render(<App />)
 
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
-  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  await userEvent.click(screen.getByRole('button', { name: 'See prices' }))
   expect(await screen.findByRole('heading', { name: '4 demo prices' })).toHaveFocus()
   expect(quoteCalls(calls).map((call) => call.body)).toEqual([{ service_type: 'RIDE', pickup_place_id: 'place-home', destination_place_id: 'place-doctor' }])
   for (const name of ['Choose Demo Ride from Demo Ride Provider', 'Choose Rapido Auto from Rapido', 'Choose Ola Mini from Ola', 'Choose Uber Go from Uber']) {
@@ -245,9 +333,9 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
   expect(confirmCalls(calls)).toHaveLength(0)
 
   await userEvent.click(screen.getByRole('button', { name: 'Go back' }))
-  expect(screen.queryByRole('button', { name: 'Confirm demo booking' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Confirm booking' })).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Choose Uber Go from Uber' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
   expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(1)
   expect(confirmCalls(calls)[0].url).toBe('/api/hub/quotes/q-uber/confirm')
@@ -259,7 +347,7 @@ test('a ride gets server prices, needs an explicit confirmation and books once w
   expect(screen.queryByText('Demo details')).not.toBeInTheDocument()
   expect(screen.queryByText('CONFIRMED_SIMULATED')).not.toBeInTheDocument()
   expect(screen.queryByText('SUCCEEDED_SIMULATED')).not.toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'Track your demo ride' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
+  expect(screen.getByRole('link', { name: 'Track ride' })).toHaveAttribute('href', '#/activity/b-uber-go-confirmed_simulated')
 })
 
 test('a lost reply is retried with the same key, so the server can return the same booking', async () => {
@@ -271,10 +359,10 @@ test('a lost reply is retried with the same key, so the server can return the sa
   window.location.hash = '#/request/ride'
   render(<App />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
-  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Confirm demo booking' }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('Could not save your changes. Please retry.')
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'See prices' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Confirm booking' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Check Activity before trying again')
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
   expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
   const keys = confirmCalls(calls).map((call) => (call.body as { idempotency_key: string }).idempotency_key)
   expect(keys).toHaveLength(2)
@@ -289,10 +377,10 @@ test('a service that is not connected explains how to connect its demo provider'
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Connect the Demo Ride Provider first' })).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Open Services' })).toHaveAttribute('href', '#/services')
-  expect(screen.queryByRole('button', { name: 'Get demo prices' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'See prices' })).not.toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: 'Connect Demo Ride Provider' }))
   expect(calls.find((call) => call.url.endsWith('/connect-demo'))?.body).toEqual({ consent: true })
-  expect(await screen.findByRole('button', { name: 'Get demo prices' })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: 'See prices' })).toBeInTheDocument()
 })
 
 test('a booking that needs caregiver approval says so instead of claiming it is booked', async () => {
@@ -301,9 +389,9 @@ test('a booking that needs caregiver approval says so instead of claiming it is 
   window.location.hash = '#/request/ride'
   render(<App />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
-  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  await userEvent.click(screen.getByRole('button', { name: 'See prices' }))
   expect(await screen.findByText(/Someone in your Care Circle must approve this first\. Above the ₹100 approval limit\./)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
   expect(await screen.findByRole('heading', { name: 'Sent for approval' })).toBeInTheDocument()
   expect(screen.getByText('Not charged (simulated)')).toBeInTheDocument()
   expect(screen.queryByText(/Saathi booked/)).not.toBeInTheDocument()
@@ -329,6 +417,7 @@ test('the profile can let Saathi choose and book rides and meals', async () => {
   const calls = stubApi({ 'PUT /profile': (body) => makeState({ profile: body as Profile }) })
   window.location.hash = '#/profile'
   render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: /Booking preferences/ }))
   expect(await screen.findByRole('radio', { name: 'Show me the options and let me confirm' })).toBeChecked()
   expect(screen.getByText(/books rides and meals straight away without asking.*Medicine requests always ask first/)).toBeInTheDocument()
   await userEvent.click(screen.getByRole('radio', { name: 'Let Saathi choose the best option and book it for me' }))
@@ -365,7 +454,7 @@ test('when Saathi books for me, one tap goes straight to the ride page with no c
   expect(screen.getByText('Demo booking confirmed: DEMO-RIDE-1042. No real driver will come and no money moves.')).toBeInTheDocument()
   expect(screen.getByText('Booked for you by Saathi')).toBeInTheDocument()
   expect(screen.getByText('Chosen by Saathi’s price-and-wait rule (not AI).')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Confirm demo booking' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Confirm booking' })).not.toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(0)
   expect(quoteCalls(calls)[0].body).toEqual({ service_type: 'RIDE', pickup_place_id: 'place-home', destination_place_id: 'place-doctor', idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/) })
 })
@@ -414,6 +503,7 @@ test('turning an option off saves the choice, and the page is honest that these 
   window.location.hash = '#/apps'
   render(<App />)
   expect(await screen.findByText('All options are simulated. No real bookings, deliveries or payments.')).toBeInTheDocument()
+  await userEvent.click(await screen.findByText('Rides', { selector: 'summary' }))
   const uber = await screen.findByRole('switch', { name: 'Use Uber' })
   expect(uber).toBeChecked()
   await userEvent.click(uber)
@@ -428,7 +518,7 @@ test('a caretaker gets the Care Circle dashboard, never the request screens', as
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Supporting Meera' })).toBeInTheDocument()
   expect(screen.queryByRole('combobox', { name: 'Where to?' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Get demo prices' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'See prices' })).not.toBeInTheDocument()
   const nav = screen.getByRole('navigation', { name: 'Main navigation' })
   expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Overview', 'Activity', 'Approvals', 'Chats', 'Safety'])
 })
@@ -516,7 +606,7 @@ test('the simplified view switch strips Home down to the mic, three tiles and a 
   const nav = screen.getByRole('navigation', { name: 'Main navigation' })
   expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Activity'])
   expect(screen.getByText('Not for emergencies.')).toBeInTheDocument()
-  expect(screen.getByText('Prototype')).toBeInTheDocument()
+  expect(screen.getByText('Preview')).toBeInTheDocument()
 
   await userEvent.click(screen.getByRole('button', { name: 'Show full view' }))
   expect(await screen.findByRole('switch', { name: 'Enable simplified view' })).toHaveAttribute('aria-checked', 'false')
@@ -532,7 +622,7 @@ test('in simplified view a booking is one choice, big buttons, "Book this?" and 
   render(<App />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
   expect(screen.queryAllByRole('textbox')).toHaveLength(0)
-  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
+  await userEvent.click(screen.getByRole('button', { name: 'See prices' }))
 
   expect(await screen.findByRole('heading', { name: 'Pick one' })).toBeInTheDocument()
   expect(screen.queryByText(/Simulated by the/)).not.toBeInTheDocument()
@@ -541,7 +631,7 @@ test('in simplified view a booking is one choice, big buttons, "Book this?" and 
   expect(await screen.findByRole('heading', { name: 'Book this?' })).toBeInTheDocument()
   expect(screen.getByText('Demo ride — no real driver will arrive.')).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(0)
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
 
   expect(await screen.findByRole('heading', { name: 'Demo booking confirmed' })).toBeInTheDocument()
   expect(confirmCalls(calls)).toHaveLength(1)

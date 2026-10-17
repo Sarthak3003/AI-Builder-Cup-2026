@@ -90,12 +90,8 @@ export default function AskSaathi({ hub, simple = false }: { hub: Hub; simple?: 
         <span className="mic-circle"><MicIcon /></span>
         <span className="mic-label">{listening ? words.listening : words.speak}</span>
       </button>
-      {simple ? null : <p id="ask-example" className="muted">{words.askExample} {state.profile.show_options === false
-        ? t('Saathi books the best ride or meal for you; medicine always asks first.', 'साथी आपके लिए सबसे अच्छी सवारी या भोजन बुक करता है; दवा के लिए हमेशा पहले आपसे पूछा जाता है।')
-        : t('You always check before anything is booked.', 'कुछ भी बुक होने से पहले हमेशा आप जाँचते हैं।')}</p>}
-      {gemini ? <p className="chip gemini">{simple
-        ? t('Recording goes to Google', 'रिकॉर्डिंग Google को भेजी जाती है')
-        : t('Gemini listens · your recording is sent to Google to understand it', 'Gemini सुनता है · आपका अनुरोध समझने के लिए रिकॉर्डिंग Google को भेजी जाती है')}</p> : null}
+      {simple ? null : <p id="ask-example" className="muted">{words.askExample}</p>}
+      {gemini ? <p className="voice-privacy">{t('Voice recordings are sent to Google.', 'आवाज़ की रिकॉर्डिंग Google को भेजी जाती है।')}</p> : null}
 
       <div className="ask-live" aria-live="polite">
         {listening && !gemini && speech.heard ? <p className="heard">“{speech.heard}”</p> : null}

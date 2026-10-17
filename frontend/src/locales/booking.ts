@@ -1,6 +1,7 @@
 import type { Translate } from '../i18n'
 
 export const bookingText: Record<string, string> = {
+	'The result could not be confirmed. Check Activity before trying again; your request may already have completed.': 'नतीजे की पुष्टि नहीं हो सकी। दोबारा कोशिश करने से पहले गतिविधि देखें; आपका अनुरोध पहले ही पूरा हो सकता है।',
 	'Demo': 'डेमो',
 	'Demo Ride Provider': 'डेमो सवारी सेवा',
 	'Demo Food Provider': 'डेमो भोजन सेवा',
@@ -58,13 +59,13 @@ export const bookingText: Record<string, string> = {
 	'Somewhere else…': 'कहीं और…', 'Place name or address': 'जगह का नाम या पता', 'e.g. Central market': 'जैसे, सेंट्रल मार्केट', 'Kitchen': 'रसोई',
 	'vegetarian': 'शाकाहारी', 'non-vegetarian': 'मांसाहारी', 'mild': 'कम मसालेदार', 'some spice': 'थोड़ा मसालेदार', 'any diet': 'कोई भी भोजन', 'any spice': 'किसी भी तरह का मसाला',
 	'Sample non-prescription items only. This is not medical advice and not a real pharmacy order.': 'केवल बिना पर्चे के मिलने वाली चीज़ों के नमूने। यह चिकित्सा सलाह या असली दवा ऑर्डर नहीं है।',
-	'Book the best demo ride': 'सबसे अच्छी डेमो सवारी बुक करें', 'Get demo prices': 'डेमो कीमतें देखें', 'Order now': 'अभी ऑर्डर करें', 'Get demo price': 'डेमो कीमत देखें',
+	'Book the best demo ride': 'सबसे अच्छी डेमो सवारी बुक करें', 'See prices': 'कीमतें देखें', 'Order now': 'अभी ऑर्डर करें', 'Get demo price': 'डेमो कीमत देखें',
 	'Pick one': 'एक चुनें', 'Choose': 'चुनें', 'Back': 'वापस', 'Change my request': 'मेरा अनुरोध बदलें',
 	'Saathi’s own demo service': 'साथी की अपनी डेमो सेवा',
 	'Pick one to see the full price. Nothing is booked until you confirm, and prices are held for 15 minutes.': 'पूरी कीमत देखने के लिए एक विकल्प चुनें। आपकी पुष्टि के बिना कुछ बुक नहीं होगा और कीमतें 15 मिनट तक मान्य हैं।',
 	'YOU HAVE THE FINAL SAY': 'आख़िरी फ़ैसला आपका है', 'Book this?': 'इसे बुक करें?', 'Check and confirm': 'जाँचें और पुष्टि करें',
 	'Price held until': 'कीमत तब तक मान्य है', 'This price has expired. Please get a new one.': 'यह कीमत अब मान्य नहीं है। कृपया नई कीमत लें।',
-	'Confirm demo booking': 'डेमो बुकिंग की पुष्टि करें', 'Compare all options': 'सभी विकल्पों की तुलना करें', 'Go back': 'वापस जाएँ', 'Read aloud': 'पढ़कर सुनाएँ',
+	'Confirm booking': 'बुकिंग की पुष्टि करें', 'Compare all options': 'सभी विकल्पों की तुलना करें', 'Go back': 'वापस जाएँ', 'Read aloud': 'पढ़कर सुनाएँ',
 	'Read aloud is unavailable in this browser.': 'इस ब्राउज़र में पढ़कर सुनाने की सुविधा उपलब्ध नहीं है।',
 	'Booking failed': 'बुकिंग असफल रही', 'Try again': 'फिर कोशिश करें', 'Ask my Care Circle for help': 'मेरे केयर सर्कल से मदद माँगें',
 	'Your Care Circle was told.': 'आपके केयर सर्कल को बता दिया गया है।',
@@ -74,7 +75,7 @@ export const bookingText: Record<string, string> = {
 	'Your Care Circle was asked. Nobody has agreed yet.': 'आपके केयर सर्कल से पूछा गया है। अभी किसी ने हाँ नहीं कही है।',
 	'Ask if someone can come with me': 'पूछें कि क्या कोई मेरे साथ आ सकता है', 'Suggestion:': 'सुझाव:', 'Done': 'हो गया',
 	'No need to call anyone.': 'किसी को फ़ोन करने की ज़रूरत नहीं है।', 'That is it. There was no need to call anyone.': 'बस हो गया। किसी को फ़ोन करने की ज़रूरत नहीं पड़ी।',
-	'Track your demo ride': 'अपनी डेमो सवारी की स्थिति देखें', 'See booking details': 'बुकिंग की जानकारी देखें', 'Book something else': 'कुछ और बुक करें',
+	'Track ride': 'अपनी डेमो सवारी की स्थिति देखें', 'See booking details': 'बुकिंग की जानकारी देखें', 'Book something else': 'कुछ और बुक करें',
 	'Back to activity': 'गतिविधि पर वापस जाएँ', 'That activity is not available.': 'वह गतिविधि उपलब्ध नहीं है।',
 	'Help': 'मदद', 'Cancel ride': 'सवारी रद्द करें', 'Cancel order': 'ऑर्डर रद्द करें', 'Cancel booking': 'बुकिंग रद्द करें',
 	'Demo: mark trip or delivery completed': 'डेमो: यात्रा या डिलीवरी पूरी होने के रूप में दर्ज करें',

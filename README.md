@@ -35,15 +35,16 @@ Use that executable for the first command if Python is not on PATH. The existing
 Backend, from the root:
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\scripts\start-local.ps1 -Service backend
 ```
 
-Frontend, in a second terminal:
+Frontend, in a second terminal from the repository root:
 
 ```powershell
-cd frontend
-npm run dev
+.\scripts\start-local.ps1 -Service frontend
 ```
+
+The backend launcher creates `backend/.env` from `backend/.env.example` if needed and loads it explicitly. Put Twilio credentials and `SAATHI_GEMINI_API_KEY` in `backend/.env`, never in frontend variables. This file is Git-ignored. Restart the backend after editing it. Keep `SAATHI_PHONE_ENABLED=false` until the credentials and public HTTPS webhook URL are configured; see [phone setup](docs/phone-assistant/telephony-setup.md).
 
 ### macOS / Linux
 

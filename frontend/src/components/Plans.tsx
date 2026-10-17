@@ -63,7 +63,7 @@ function PlanForms({ runner, canMedicine }: { runner: Runner; canMedicine: boole
   const [reminder, setReminder] = useState({ title: '', kind: 'other', when: tomorrow })
   return (
     <>
-      <details className="more">
+      <details className="more" name="plan-editor">
         <summary>{t('Add an appointment', 'अपॉइंटमेंट जोड़ें')}</summary>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -81,7 +81,7 @@ function PlanForms({ runner, canMedicine }: { runner: Runner; canMedicine: boole
           <button className="primary wide" disabled={busy}>{t('Save appointment', 'अपॉइंटमेंट सहेजें')}</button>
         </form>
       </details>
-      <details className="more">
+      <details className="more" name="plan-editor">
         <summary>{t('Add a reminder', 'रिमाइंडर जोड़ें')}</summary>
         <form onSubmit={(event) => {
           event.preventDefault()

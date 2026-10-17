@@ -129,7 +129,7 @@ export default function CareScreen({ hub }: { hub: Hub }) {
         {circle.length ? <ul className="member-list">{circle.map((grant) => <Member key={`${grant.id}-${grant.role}-${grant.permissions.join()}`} hub={hub} grant={grant} />)}</ul> : <p className="muted">{t('No one yet.', 'अभी कोई नहीं है।')}</p>}
       </section>
 
-      <section className="card" aria-labelledby="add-title">
+      <details className="settings-group" name="family-settings"><summary>{t('Invite someone', 'किसी को आमंत्रित करें')}</summary><section className="card" aria-labelledby="add-title">
         <h2 id="add-title">{t('Add someone', 'किसी को जोड़ें')}</h2>
         <form onSubmit={(event) => {
           event.preventDefault()
@@ -145,9 +145,9 @@ export default function CareScreen({ hub }: { hub: Hub }) {
           <button className="primary wide" disabled={busy}>{t('Create invitation', 'निमंत्रण बनाएँ')}</button>
         </form>
         {code ? <InviteBox code={code} /> : null}
-      </section>
+      </section></details>
 
-      <section className="card" aria-labelledby="share-title">
+      <details className="settings-group" name="family-settings"><summary>{t('Sharing & approvals', 'साझा करना और मंज़ूरी')}</summary><section className="card" aria-labelledby="share-title">
         <h2 id="share-title">{t('What you share', 'आप क्या साझा करते हैं')}</h2>
         {(Object.keys(shareLabels) as (keyof Sharing)[]).map((key) => (
           <label key={key} className="check-row">
@@ -160,9 +160,9 @@ export default function CareScreen({ hub }: { hub: Hub }) {
           <input type="checkbox" checked={state.profile.caregiver_enabled} disabled={busy} onChange={(e) => saveProfile({ caregiver_enabled: e.target.checked })} />
           {t('Ask an approver before booking above ₹{{limit}}, and for every medicine request', '₹{{limit}} से अधिक की बुकिंग और हर दवा अनुरोध से पहले मंज़ूरी लें', { limit: state.profile.approval_limit })}
         </label>
-      </section>
+      </section></details>
 
-      <section className="card" aria-labelledby="contacts-title">
+      <details className="settings-group" name="family-settings"><summary>{t('Trusted contacts', 'भरोसेमंद संपर्क')}</summary><section className="card" aria-labelledby="contacts-title">
         <h2 id="contacts-title">{t('Trusted contacts', 'भरोसेमंद संपर्क')}</h2>
         {(state.contacts ?? []).length ? (
           <ul className="plain-list">
@@ -183,7 +183,7 @@ export default function CareScreen({ hub }: { hub: Hub }) {
           <label className="field"><span>{t('Phone', 'फ़ोन')}</span><input maxLength={30} inputMode="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} /></label>
           <button className="secondary wide" disabled={busy}>{t('Add contact', 'संपर्क जोड़ें')}</button>
         </form>
-      </section>
+      </section></details>
     </>
   )
 }

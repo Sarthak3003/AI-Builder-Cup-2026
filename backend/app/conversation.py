@@ -25,7 +25,7 @@ from app.bookings import (
 from app.care import ensure
 from app.domain import rupees
 from app.hub_store import initial_state
-from app.intent import EMERGENCY, EMERGENCY_WORDS, SCAM, looks_like_scam, understand
+from app.intent import EMERGENCY, EMERGENCY_WORDS, SCAM, clarify_draft, looks_like_scam, understand
 from app.onboarding import connect, default_pickup
 from app.providers import PlaceRef, enabled_apps
 from app.workflows import MEDICAL_DIET, MEDICAL_DIET_WORDS, quote_for_draft, record, remember
@@ -243,9 +243,29 @@ class ConversationEngine:
             inferred, _ = understand(message, state["profile"])
             if not inferred or inferred.service != "ride":
                 message = "order food " + message
-        return self.interpret(message, state["profile"], timeout=4)[0]
+        if session["waiting_for"] in {"clarification", "meal"} and assistant.configured():
+            context = json.dumps(
+                {
+                    "service": session["service"],
+                    "details": session["draft"],
+                    "previous_question": session["last_reply"],
+                    "answer": turn.message,
+                },
+                ensure_ascii=False,
+            )
+            try:
+                return assistant.draft_request(
+                    "Clarify the current request using this conversation data: " + context,
+                    state["profile"],
+                    timeout=4,
+                )
+            except HTTPException:
+                return None  # The transactional engine applies its deterministic fallback.
+        draft, _, by = self.interpret(message, state["profile"], timeout=4)
+        return draft if by == "gemini" else None
 
     def app_request(self, state, conv_id, message, channel, draft, question, by, appointment=None):
+        draft = clarify_draft(message, draft, state["profile"])
         if looks_like_scam(message):
             draft, question = None, SCAM
         elif any(word in message.lower() for word in EMERGENCY_WORDS):
@@ -253,7 +273,7 @@ class ConversationEngine:
         service = draft.service if draft else None
         destination = appointment["place"] if appointment else (draft.destination if draft else "")
         made, reply = None, (draft.clarification if draft else question)
-        if draft and not draft.clarification:
+        if draft and draft.service and not draft.clarification:
             try:
                 made = quote_for_draft(state, draft, message, channel, appointment)
             except HTTPException as refusal:
@@ -427,14 +447,15 @@ class ConversationEngine:
             inferred, _ = understand("order food " + turn.message, state["profile"])
             if inferred and inferred.service != "food":
                 inferred = None
-        given = draft or inferred
+        given = clarify_draft(turn.message, draft or inferred, state["profile"])
         if (
             session["service"] == "food"
             and re.match(r"(?:actually|instead|change|make it|बदलो|बदलें)\b", text)
             and not (given and given.service in {"ride", "medicine"})
         ):
             _invalidate(state, session)
-            given, _ = understand("order food " + turn.message, state["profile"])
+            if not (given and given.clarification):
+                given, _ = understand("order food " + turn.message, state["profile"])
             transition(session, "COLLECTING_DETAILS")
             session["waiting_for"] = "meal"
         if any(word in turn.message.lower() for word in MEDICAL_DIET_WORDS) and (
@@ -445,6 +466,22 @@ class ConversationEngine:
             _invalidate(state, session)
             transition(session, "CANCELLED")
             return MEDICAL_DIET
+        if given and (given.service is None or (draft is not None and given.clarification.strip())):
+            _invalidate(state, session)
+            transition(session, "COLLECTING_DETAILS")
+            if given.service and given.service != session["service"]:
+                session.update(service=given.service, draft={}, pickup=None)
+            # Keep established details, but never promote an uncertain draft to a quote.
+            if given.service:
+                session["draft"].update(
+                    {
+                        k: v
+                        for k, v in given.model_dump(exclude_none=True).items()
+                        if k not in {"clarification", "service"} and v != ""
+                    }
+                )
+            session["waiting_for"] = "meal" if session["service"] == "food" else "clarification"
+            return given.clarification
         if given and given.service != session["service"]:
             _invalidate(state, session)
             transition(session, "COLLECTING_DETAILS")

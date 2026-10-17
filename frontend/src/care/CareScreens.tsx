@@ -59,7 +59,7 @@ export function Safety({ hub }: { hub: CareHub }) {
         </section>
       ) : null}
       {contacts ? (
-        <section className="card">
+        <details className="settings-group" name="safety-settings"><summary>{t('Trusted contacts', 'भरोसेमंद संपर्क')}</summary>        <section className="card">
           <h2>{t('Trusted contacts', 'भरोसेमंद संपर्क')}</h2>
           <ul className="plain-list">
             {state.contacts.map((person) => (
@@ -78,7 +78,7 @@ export function Safety({ hub }: { hub: CareHub }) {
             <label className="field"><span>{t('Phone', 'फ़ोन')}</span><input maxLength={30} inputMode="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} /></label>
             <button className="secondary wide" disabled={busy}>{t('Add contact', 'संपर्क जोड़ें')}</button>
           </form>
-        </section>
+        </section></details>
       ) : null}
     </>
   )
@@ -95,7 +95,7 @@ export function CircleSettings({ hub, onLeave, onSwitch }: { hub: CareHub; onLea
     <>
       <h1 className="page-title">{t('Care Circle & settings', 'देखभाल मंडली और सेटिंग्स')}</h1>
       <PersonSwitcher people={state.demo_people} current={state.demo_person} busy={busy} onSwitch={onSwitch} />
-      <section className="card">
+      <details className="settings-group" name="caretaker-settings"><summary>{t('Your access', 'आपकी अनुमतियाँ')}</summary><section className="card">
         <h2>{t('Your access', 'आपकी अनुमतियाँ')}</h2>
         <p>{t('{{name}} added you as', '{{name}} ने आपको इस भूमिका में जोड़ा है:', { name: state.owner.name })} <strong>{text(roleLabel[state.grant.role])}</strong>{t('. They can change or remove this at any time.', '। वे इसे कभी भी बदल या हटा सकते हैं।')}</p>
         <ul className="perm-check">
@@ -104,18 +104,18 @@ export function CircleSettings({ hub, onLeave, onSwitch }: { hub: CareHub; onLea
           ))}
         </ul>
         <p className="muted">{t('Notifications appear in this dashboard only. Saathi does not send texts or emails in this demo.', 'सूचनाएँ केवल इस डैशबोर्ड पर दिखाई देती हैं। इस डेमो में साथी संदेश या ईमेल नहीं भेजता।')}</p>
-      </section>
+      </section></details>
       {allowed(hub, 'edit_profile') ? (
-        <section className="card">
+        <details className="settings-group" name="caretaker-settings"><summary>{t('Pickup address', 'लेने आने का पता')}</summary><section className="card">
           <h2>{t('Pickup address', 'लेने आने का पता')}</h2>
           <form onSubmit={(event) => { event.preventDefault(); void run(async () => { await api('/profile/home', 'PUT', { home }); await refresh(); notify(t('Address saved.', 'पता सहेजा गया।')) }) }}>
             <label className="field"><span>{t('Home address', 'घर का पता')}</span><input required maxLength={150} value={home} onChange={(e) => setHome(e.target.value)} /></label>
             <button className="secondary wide" disabled={busy}>{t('Save address', 'पता सहेजें')}</button>
           </form>
-        </section>
+        </section></details>
       ) : null}
       {allowed(hub, 'manage_circle') ? (
-        <section className="card">
+        <details className="settings-group" name="caretaker-settings"><summary>{t('People', 'लोग')}</summary><section className="card">
           <h2>{t('People', 'लोग')}</h2>
           <ul className="plain-list">{state.circle.map((person) => <li key={person.id}>{person.name} · {text(roleLabel[person.role])} · {text(person.status)}</li>)}</ul>
           <form onSubmit={(event) => {
@@ -132,7 +132,7 @@ export function CircleSettings({ hub, onLeave, onSwitch }: { hub: CareHub; onLea
             <button className="secondary wide" disabled={busy}>{t('Create invitation', 'निमंत्रण बनाएँ')}</button>
           </form>
           {code ? <label className="field"><span>{t('Invitation link', 'निमंत्रण लिंक')}</span><input readOnly value={`${window.location.origin}${window.location.pathname}#/join/${code}`} onFocus={(e) => e.target.select()} /></label> : null}
-        </section>
+        </section></details>
       ) : null}
       <button className="secondary wide" disabled={busy} onClick={onLeave}>{t('Leave the caretaker view on this browser', 'इस ब्राउज़र पर देखभालकर्ता दृश्य से बाहर निकलें')}</button>
     </>

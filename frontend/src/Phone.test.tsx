@@ -24,6 +24,7 @@ test('pairing is owner-only, private, single-use and transcript retention is opt
   }, makeState({ phone }))
   window.location.hash = '#/profile'
   render(<App />)
+  await userEvent.click(await screen.findByText('Telephone access'))
   expect(await screen.findByRole('heading', { name: 'Call Saathi' })).toBeInTheDocument()
   expect(screen.getByRole('checkbox', { name: 'Save a redacted text transcript for this call' })).not.toBeChecked()
   expect(screen.getByRole('link', { name: 'Call +15555550124' })).toHaveAttribute('href', 'tel:+15555550124')
@@ -36,12 +37,13 @@ test('pairing is owner-only, private, single-use and transcript retention is opt
   expect(screen.queryByText('0123 4567')).not.toBeInTheDocument()
 })
 
-test('disabled calling explains the configuration rather than offering a simulator', async () => {
+test('disabled calling explains configuration without a simulator', async () => {
   stubApi({}, makeState({ phone: { enabled: false, number: '' } }))
   window.location.hash = '#/profile'
   render(<App />)
   expect(await screen.findByText(/Telephone calling is not enabled/)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Generate pairing code' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Start simulated call' })).not.toBeInTheDocument()
 })
 
 test('activity shows call source, duration, verified result and optional transcript', async () => {

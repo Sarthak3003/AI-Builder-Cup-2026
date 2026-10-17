@@ -105,6 +105,33 @@ def session_documents():
     return store, list(limits["active"])
 
 
+def test_signed_phone_clarification_replay_then_booking(owner, monkeypatch):
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test-key")
+    replies = iter(
+        [
+            assistant.Draft(service="food", budget=150, clarification="What meal would you like?"),
+            assistant.Draft(service="food", vegetarian=True, mild=True),
+        ]
+    )
+    monkeypatch.setattr(assistant, "draft_request", lambda *a, **k: next(replies))
+    call = Call(owner)
+    call.pair(owner)
+    url = call.action
+    call.say("Something suitable for me")
+    assert "What meal would you like?" in call.text
+    response = ET.tostring(call.xml)
+    assert not state(owner)["quotes"] and not state(owner)["activity"]
+    call.send(url, SpeechResult="Something suitable for me")
+    assert ET.tostring(call.xml) == response
+    call.say("vegetarian and mild")
+    assert "Which option" in call.text
+    call.digits("1")
+    assert "Shall I confirm" in call.text and not state(owner)["activity"]
+    call.digits("1")
+    assert call.xml.find("Hangup") is not None
+    assert len(state(owner)["activity"]) == 1
+
+
 def test_incoming_speech_and_keypad_follow_documented_twiml(owner):
     call = Call(owner)
     gather = call.xml.find("Gather")

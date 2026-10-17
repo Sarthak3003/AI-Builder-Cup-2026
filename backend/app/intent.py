@@ -168,6 +168,34 @@ def _score(text: str, words: tuple[str, ...]) -> int:
     return sum(_has(text, word) for word in words)
 
 
+def clarify_draft(message: str, draft: Draft | None, profile: dict) -> Draft | None:
+    """Never turn a generic help request or unknown service into an order."""
+    text = message.lower().strip(" .!?।")
+    generic = not any(_score(text, words) for words in KEYWORDS.values()) and (
+        bool(re.search(r"\bhelp\b", text))
+        or "मदद" in text
+        or text in {"hello", "hi", "something", "नमस्ते", "कुछ चाहिए"}
+    )
+    if generic:
+        return Draft(
+            service=None,
+            clarification=(
+                "आपको सवारी, भोजन या दवा में किस चीज़ की मदद चाहिए?"
+                if profile.get("language") == "hi-IN"
+                else "Do you need a ride, food or medicine?"
+            ),
+        )
+    if draft and draft.service is None and not draft.clarification.strip():
+        return draft.model_copy(
+            update={
+                "clarification": "सवारी, भोजन या दवा चाहिए?"
+                if profile.get("language") == "hi-IN"
+                else "Do you need a ride, food or medicine?"
+            }
+        )
+    return draft
+
+
 def destination(message: str) -> str:
     match = _ENGLISH_PLACE.search(message) or _HINDI_PLACE.search(message.strip())
     if not match:

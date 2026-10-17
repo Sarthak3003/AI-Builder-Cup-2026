@@ -52,8 +52,8 @@ test('a failed booking says nothing was booked or charged and offers a way forwa
   window.location.hash = '#/request/ride'
   render(<App />)
   await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Where to?' }), 'Doctor')
-  await userEvent.click(screen.getByRole('button', { name: 'Get demo prices' }))
-  await userEvent.click(await screen.findByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'See prices' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Confirm booking' }))
   expect(await screen.findByRole('heading', { name: 'Booking failed' })).toBeInTheDocument()
   expect(screen.getByText(/Nothing was booked and nothing was charged/)).toBeInTheDocument()
   expect(screen.getByText('Not charged (simulated)')).toBeInTheDocument()
@@ -70,7 +70,7 @@ test('a ride for an appointment shows the appointment and only suggests asking s
   window.location.hash = '#/request/ride/r-1'
   render(<App />)
   expect(await screen.findByText(/For your appointment:/)).toHaveTextContent('Check-up with Dr Mehta')
-  await userEvent.click(screen.getByRole('button', { name: 'Confirm demo booking' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Confirm booking' }))
   expect(await screen.findByText(/Nobody is asked unless you choose to/)).toBeInTheDocument()
   expect(calls.some((call) => call.url.endsWith('/help'))).toBe(false)
   await userEvent.click(screen.getByRole('button', { name: 'Ask if someone can come with me' }))
@@ -83,6 +83,7 @@ test('the owner invites someone with a role plus chosen sensitive permissions an
   window.location.hash = '#/family'
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Your Care Circle' })).toBeInTheDocument()
+  await userEvent.click(screen.getByText('Invite someone', { selector: 'summary' }))
   const form = screen.getByRole('heading', { name: 'Add someone' }).closest('section') as HTMLElement
   await userEvent.type(within(form).getByRole('textbox', { name: 'Name' }), 'Asha')
   await userEvent.click(within(form).getByRole('radio', { name: /Approver/ }))
@@ -103,6 +104,7 @@ test('the owner can change what is shared, remove a person and ask for help', as
   render(<App />)
   const person = (await screen.findByText('Asha', { selector: 'strong' })).closest('li') as HTMLElement
   expect(within(person).getByText('Approve or decline requests sent for approval')).toBeInTheDocument()
+  await userEvent.click(screen.getByText('Sharing & approvals', { selector: 'summary' }))
   await userEvent.click(screen.getByRole('checkbox', { name: 'Rides' }))
   const saved = calls.find((call) => call.method === 'PUT')?.body as HubState['profile']
   expect(saved.sharing).toEqual({ ride: false, food: true, medicine: true, appointments: true })

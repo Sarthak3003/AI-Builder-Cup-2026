@@ -1,5 +1,6 @@
 import io
 import json
+from urllib.error import HTTPError
 
 import pytest
 from fastapi import HTTPException
@@ -7,6 +8,59 @@ from fastapi import HTTPException
 from app import assistant
 
 PROFILE = {"budget": 200, "vegetarian": True, "mild": True, "medicines": ["Vitamin D"]}
+
+
+@pytest.mark.parametrize(
+    "code,expected,calls", [(429, 429, 1), (403, 503, 1), (400, 502, 1), (503, 503, 2)]
+)
+def test_provider_errors_are_sanitized_and_retries_bounded(monkeypatch, code, expected, calls):
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "private-key")
+    attempts = []
+
+    def fail(request, timeout):
+        attempts.append(timeout)
+        raise HTTPError(request.full_url, code, "private provider body", {}, None)
+
+    monkeypatch.setattr(assistant, "urlopen", fail)
+    monkeypatch.setattr(assistant.time, "sleep", lambda _: None)
+    with pytest.raises(HTTPException) as caught:
+        assistant.draft_request("hello", PROFILE)
+    assert caught.value.status_code == expected
+    assert "private" not in caught.value.detail
+    assert len(attempts) == calls
+    assert attempts[-1] <= attempts[0]
+
+
+def test_transient_failure_recovers_without_repeating_execution(monkeypatch):
+    sent = fake_gemini(monkeypatch, {"service": "ride", "destination": "Park"})
+    success = assistant.urlopen
+    attempts = []
+
+    def flaky(request, timeout):
+        attempts.append(timeout)
+        if len(attempts) == 1:
+            raise HTTPError(request.full_url, 503, "busy", {}, None)
+        return success(request, timeout)
+
+    monkeypatch.setattr(assistant, "urlopen", flaky)
+    monkeypatch.setattr(assistant.time, "sleep", lambda _: None)
+    assert assistant.draft_request("ride to Park", PROFILE).destination == "Park"
+    assert len(attempts) == 2 and len(sent) == 1
+
+
+def test_phone_timeout_is_not_retried(monkeypatch):
+    monkeypatch.setenv("SAATHI_GEMINI_API_KEY", "test")
+    attempts = []
+
+    def fail(request, timeout):
+        attempts.append(timeout)
+        raise TimeoutError()
+
+    monkeypatch.setattr(assistant, "urlopen", fail)
+    with pytest.raises(HTTPException) as caught:
+        assistant.draft_request("hello", PROFILE, timeout=4)
+    assert caught.value.status_code == 504
+    assert attempts == [4]
 
 
 def fake_gemini(monkeypatch, reply):
@@ -52,6 +106,14 @@ def test_text_drafts_use_the_same_call(monkeypatch):
     payload = json.loads(sent[0].data)
     assert payload["contents"][0]["parts"] == [{"text": "Take me to the park"}]
     assert "transcript" not in payload["generationConfig"]["responseJsonSchema"]["properties"]
+
+
+def test_unknown_service_is_valid_and_schema_allows_null(monkeypatch):
+    sent = fake_gemini(monkeypatch, {"service": None, "clarification": "What do you need?"})
+    draft = assistant.draft_request("Can you help me?", PROFILE)
+    assert draft.service is None and draft.clarification == "What do you need?"
+    schema = json.loads(sent[0].data)["generationConfig"]["responseJsonSchema"]
+    assert {"type": "null"} in schema["properties"]["service"]["anyOf"]
 
 
 def test_unusable_replies_become_a_retry_message(monkeypatch):
@@ -130,8 +192,8 @@ def test_generated_prose_uses_saved_language_without_translating_data(monkeypatc
     if kind == "draft":
         assert parts == [{"text": message}]
         assert payload["generationConfig"]["responseJsonSchema"]["properties"]["service"][
-            "enum"
-        ] == ["food", "ride", "medicine"]
+            "anyOf"
+        ] == [{"enum": ["food", "ride", "medicine"], "type": "string"}, {"type": "null"}]
     elif kind == "voice":
         assert "exact transcript, in the language and script spoken" in parts[0]["text"]
     elif kind == "pick":

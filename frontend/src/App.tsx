@@ -61,7 +61,7 @@ export default function App() {
 function AppContent() {
   const { language, setLanguage, t, text } = useI18n()
   const [state, setState] = useState<HubState | CareState | null>(null)
-  const { busy, error, notice, run, setError, setNotice } = useRunner()
+  const { busy, error, notice, run, setError, setNotice, inFlight, operationVersion } = useRunner()
   const [route, go] = useRoute()
   const online = useOnline()
   const install = useInstall()
@@ -90,16 +90,17 @@ function AppContent() {
     let active = true
     let pending = false
     const poll = () => {
-      if (!active || pending || document.visibilityState !== 'visible' || !navigator.onLine) return
+      if (!active || pending || inFlight.current || document.visibilityState !== 'visible' || !navigator.onLine) return
       pending = true
-      api<HubState | CareState>('/snapshot').then((data) => { if (active) setState(data) }).catch((failure) => {
-        if (active && failure instanceof Error && /removed|revoked|expired|Invalid session/i.test(failure.message)) { setState(null); setError(failure.message) }
+      const version = operationVersion.current
+      api<HubState | CareState>('/snapshot').then((data) => { if (active && version === operationVersion.current) setState(data) }).catch((failure) => {
+        if (active && version === operationVersion.current && failure instanceof Error && /removed|revoked|expired|Invalid session/i.test(failure.message)) { setState(null); setError(failure.message) }
       }).finally(() => { pending = false })
     }
     const timer = window.setInterval(poll, pollMs)
     document.addEventListener('visibilitychange', poll)
     return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', poll) }
-  }, [signedIn, setError, pollMs])
+  }, [signedIn, setError, pollMs, inFlight, operationVersion])
 
   const care = state?.role === 'caregiver' ? state : null
   const owner = state?.role === 'owner' ? state : null
@@ -205,11 +206,15 @@ function AppContent() {
         <OfflineBanner online={online} />
         <header className="topbar">
           <a className="brand" href="#/" aria-label={t('Saathi home', 'साथी का होम पेज')}><LogoMark size={34} /><span className="wordmark">{t('saathi', 'साथी')}</span></a>
-          <span className="chip demo">{care ? t('Care Circle · demo', 'केयर सर्कल · डेमो') : t('Prototype', 'प्रोटोटाइप')}</span>
+          <span className="chip demo">{care ? t('Care Circle', 'केयर सर्कल') : t('Preview', 'पूर्वावलोकन')}</span>
           {care ? <a className="avatar" href="#/circle" aria-label={t('Care Circle and settings', 'केयर सर्कल और सेटिंग्स')}>{care.grant.name.slice(0, 1)}</a> : null}
           {owner && !simple ? <a className="avatar" href="#/profile" aria-label={t('Open profile', 'प्रोफ़ाइल खोलें')}>{owner.profile.name.slice(0, 1)}</a> : null}
         </header>
 
+        <div className="action-feedback" role="status" aria-live="polite" aria-atomic="true">
+          {busy ? <div className="action-progress"><span className="action-spinner" aria-hidden="true" />{t('Working on it…', 'काम हो रहा है…')}</div>
+            : notice ? <div className="action-success"><span aria-hidden="true">✓</span><span>{text(notice)}</span><button type="button" className="secondary small" onClick={() => setNotice('')} aria-label={t('Dismiss notification', 'सूचना हटाएँ')}>×</button></div> : null}
+        </div>
         <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
           {error ? (
             <div className="error" role="alert">
@@ -220,16 +225,14 @@ function AppContent() {
               </div>
             </div>
           ) : null}
-          {notice ? <p className="notice" role="status">{text(notice)}</p> : null}
-          {busy ? <p className="busy" role="status">{t('Saving your request…', 'आपका अनुरोध सहेजा जा रहा है…')}</p> : null}
           {content()}
         </main>
 
         <footer className="footnote">
           {simple ? <p>{words.notEmergency}</p> : (
             <>
-              <ConnectionStatus />
-              <p>{t('Saathi cannot respond to emergencies. Contact local emergency services directly.', 'साथी आपात स्थिति में मदद नहीं कर सकता। सीधे स्थानीय आपातकालीन सेवाओं से संपर्क करें।')}</p>
+              <details className="connection-details"><summary>{t('Connection status', 'कनेक्शन की स्थिति')}</summary><ConnectionStatus /></details>
+              <p>{t('Preview app · bookings and payments are simulated.', 'पूर्वावलोकन ऐप · बुकिंग और भुगतान सिम्युलेटेड हैं।')}</p>
               <a href="#/about">{t('About this demo', 'इस डेमो के बारे में')}</a>
             </>
           )}
