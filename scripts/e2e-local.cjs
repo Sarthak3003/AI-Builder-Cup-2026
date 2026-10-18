@@ -10,10 +10,20 @@ const BASE = process.env.BASE_URL || 'http://127.0.0.1:5173';
 const PHONE = { width: 390, height: 844 };
 const tab = (page, name) => page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: new RegExp(`^${name}\\b`) });
 
+async function expand(page, summary) {
+  const group = page.locator('details', { has: page.locator(':scope > summary', { hasText: summary }) });
+  if (await group.getAttribute('open') === null) await group.locator(':scope > summary').click();
+}
+
+async function demoTools(page) {
+  await page.goto(`${BASE}/#/profile`);
+  await expand(page, 'Prototype tools');
+}
+
 async function rideToDoctor(page) {
   await page.goto(`${BASE}/#/request/ride`);
   await page.getByRole('combobox', { name: 'Where to?' }).selectOption({ label: 'Doctor' });
-  await page.getByRole('button', { name: 'Get demo prices' }).click();
+  await page.getByRole('button', { name: 'See prices' }).click();
 }
 
 (async () => {
@@ -24,7 +34,7 @@ async function rideToDoctor(page) {
   meera.on('pageerror', (error) => errors.push(error.message));
 
   // 0. Fresh start: the demo reset asks for confirmation, then opens setup.
-  await meera.goto(`${BASE}/#/profile`);
+  await demoTools(meera);
   await meera.getByRole('button', { name: 'Start fresh at setup' }).click();
   await meera.getByRole('button', { name: 'Yes, reset the demo' }).click();
   await meera.getByRole('heading', { name: 'Welcome' }).waitFor();
@@ -37,6 +47,7 @@ async function rideToDoctor(page) {
   await meera.getByRole('button', { name: 'Continue' }).click();
   await meera.getByRole('heading', { name: 'Saved places' }).waitFor();
   for (const place of ['Home', 'Doctor']) {
+    if (place !== 'Home') await meera.getByRole('button', { name: 'Add another place' }).click();
     await meera.getByRole('button', { name: `Use sample: ${place}` }).click();
     await meera.getByRole('button', { name: 'Save place' }).click();
     await meera.getByRole('list', { name: 'Saved places' }).getByText(place, { exact: true }).waitFor();
@@ -49,8 +60,9 @@ async function rideToDoctor(page) {
   const raviLink = await meera.getByRole('textbox', { name: 'Invitation link for Ravi' }).inputValue();
   await meera.getByRole('button', { name: 'Continue' }).click();
   await meera.getByRole('heading', { name: 'Demo services' }).waitFor();
-  await meera.getByRole('button', { name: 'Connect Demo Ride Provider' }).click();
-  await meera.getByRole('button', { name: 'Disconnect Demo Ride Provider' }).waitFor();
+  await expand(meera, 'Rides');
+  await meera.getByRole('switch', { name: 'Use Demo Ride Provider' }).click();
+  await meera.locator('[role="switch"][aria-label="Use Demo Ride Provider"][aria-checked="true"]').waitFor();
   await meera.getByRole('button', { name: 'Continue' }).click();
   await meera.getByRole('heading', { name: 'Payment (simulated)' }).waitFor();
   await meera.getByRole('radio', { name: /^Demo wallet \(simulated\)/ }).check();
@@ -68,16 +80,13 @@ async function rideToDoctor(page) {
   assert.equal(await meera.locator('.review-price').innerText(), '₹94');
 
   // 3. Confirm: a stable demo reference, separate booking and payment statuses, no money charged.
-  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
+  await meera.getByRole('button', { name: 'Confirm booking' }).click();
   await meera.getByRole('heading', { name: 'Demo booking confirmed' }).waitFor();
   await meera.getByText('DEMO-RIDE-1042').waitFor();
   await meera.getByText('Booked · simulated').waitFor();
   await meera.getByText('Paid (simulated) · no money charged').waitFor();
   await meera.getByText(/^No money charged\./).waitFor();
-  await meera.getByText('Demo details').click();
-  await meera.getByText('CONFIRMED_SIMULATED').waitFor();
-  await meera.getByText('SUCCEEDED_SIMULATED').waitFor();
-  const detail = await meera.getByRole('link', { name: 'Track your demo ride' }).getAttribute('href');
+  const detail = await meera.getByRole('link', { name: 'Track ride' }).getAttribute('href');
   await meera.goto(`${BASE}/${detail}`);
   await meera.getByRole('heading', { name: 'Demo driver on the way' }).waitFor();
   await meera.getByText('Demo map · not live').waitFor();
@@ -107,12 +116,14 @@ async function rideToDoctor(page) {
   await ravi.getByText(/^Refused by the server: Not shared with you/).waitFor();
 
   // 6. A forced failure: neither booking nor payment is marked successful, and the first ride is unchanged.
-  await meera.goto(`${BASE}/#/profile`);
-  await meera.getByRole('button', { name: 'Make the next booking fail' }).click();
-  await meera.getByText(/The next booking you confirm will fail/).waitFor();
+  const armed = await meera.evaluate(async () => {
+    const response = await fetch('/api/hub/demo/fail-next', { method: 'POST' });
+    return response.ok;
+  });
+  assert(armed, 'Could not arm the API-only failure test');
   await rideToDoctor(meera);
   await meera.getByRole('button', { name: 'Choose Demo Ride from Demo Ride Provider' }).click();
-  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
+  await meera.getByRole('button', { name: 'Confirm booking' }).click();
   await meera.getByRole('heading', { name: 'Booking failed' }).waitFor();
   await meera.getByText('Failed · nothing booked').waitFor();
   await meera.getByText('Not charged (simulated)').waitFor();
@@ -120,7 +131,7 @@ async function rideToDoctor(page) {
   await meera.getByText('Booked · simulated').first().waitFor();
 
   // Part 2. Meera's seeded demo: Ola Mini (₹125) is above her ₹100 limit, so Asha must approve.
-  await meera.goto(`${BASE}/#/profile`);
+  await demoTools(meera);
   await meera.getByRole('button', { name: "Load Meera's demo" }).click();
   await meera.getByRole('button', { name: 'Yes, reset the demo' }).click();
   await meera.getByText("Meera's demo is loaded.").waitFor();
@@ -133,7 +144,7 @@ async function rideToDoctor(page) {
   await rideToDoctor(meera);
   await meera.getByRole('button', { name: 'Choose Ola Mini from Ola' }).click();
   await meera.getByText(/must approve this first/).waitFor();
-  await meera.getByRole('button', { name: 'Confirm demo booking' }).click();
+  await meera.getByRole('button', { name: 'Confirm booking' }).click();
   await meera.getByRole('heading', { name: 'Sent for approval' }).waitFor();
   await tab(asha, 'Approvals').click();
   await asha.reload();
