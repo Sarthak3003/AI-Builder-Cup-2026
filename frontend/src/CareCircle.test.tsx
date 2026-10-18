@@ -248,7 +248,7 @@ test('upcoming plans flag missed reminders without claiming a medicine was taken
   expect(calls.some((call) => call.url.endsWith('/reminders/r1/done'))).toBe(true)
 })
 
-test('demo controls load Meera with caretaker links and arm a failure, only when enabled', async () => {
+test('demo controls load Meera with caretaker links without exposing failure controls', async () => {
   const seeded = makeState({ profile: { ...makeState().profile, name: 'Meera' }, demo_controls: true })
   const calls = stubApi({ 'POST /demo/reset': () => ({ scenario: 'meera', state: seeded, invites: [{ name: 'Asha', role: 'approver', code: 'c1.s' }, { name: 'Ravi', role: 'viewer', code: 'c2.s' }] }), 'POST /demo/fail-next': () => ({ fail_next: true }) }, makeState({ demo_controls: true }))
   window.location.hash = '#/profile'
@@ -260,8 +260,9 @@ test('demo controls load Meera with caretaker links and arm a failure, only when
   expect(await screen.findByDisplayValue(/#\/join\/c1\.s$/)).toBeInTheDocument()
   expect(screen.getByDisplayValue(/#\/join\/c2\.s$/)).toBeInTheDocument()
   expect(calls.find((call) => call.url.endsWith('/demo/reset'))?.body).toEqual({ scenario: 'meera', confirm: true })
-  await userEvent.click(screen.getByRole('button', { name: 'Make the next booking fail' }))
-  expect(calls.some((call) => call.url.endsWith('/demo/fail-next'))).toBe(true)
+  expect(screen.queryByRole('heading', { name: 'Failure test' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Make the next booking fail' })).not.toBeInTheDocument()
+  expect(calls.some((call) => call.url.endsWith('/demo/fail-next'))).toBe(false)
 })
 
 test('a fresh demo reset asks first, then opens setup', async () => {

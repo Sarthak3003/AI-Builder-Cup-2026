@@ -61,10 +61,6 @@ export default function DemoControls({ hub }: { hub: Hub }) {
           <button key={scenario} ref={(node) => { openers.current[scenario] = node }} className="secondary wide" disabled={busy} onClick={() => setPending(scenario)}>{text(SCENARIOS[scenario].button)}</button>
         ))
       )}
-      <h3>{t('Failure test', 'विफलता का परीक्षण')}</h3>
-      <button className="secondary wide" disabled={busy} onClick={() => void run(async () => { await api('/demo/fail-next', 'POST'); notify(t('The next booking you confirm will fail, so you can see the failure path.', 'आप जिस अगली बुकिंग की पुष्टि करेंगे वह विफल होगी, ताकि आप देख सकें कि विफल होने पर क्या होता है।')) })}>
-        {t('Make the next booking fail', 'अगली बुकिंग को विफल करें')}
-      </button>
       {invites.length ? (
         <div className="invite-box">
           <p><strong>{t('To use Saathi as Asha or Ravi in this browser,', 'इस ब्राउज़र में Asha या Ravi के रूप में साथी इस्तेमाल करने के लिए,')}</strong> {t('tap their name under Switch account at the top of this page.', 'इस पेज के ऊपर खाता बदलें में उनके नाम पर टैप करें।')}</p>
