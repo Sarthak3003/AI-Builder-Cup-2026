@@ -1,0 +1,6 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    { "collectionGroup": "hubAccounts", "fieldPath": "*", "indexes": [] }
+  ]
+}

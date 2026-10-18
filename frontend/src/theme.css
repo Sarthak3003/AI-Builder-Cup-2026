@@ -1,0 +1,66 @@
+:root {
+  /* Google brand colours. They fail WCAG AA as text or behind white text, so use them for accents and icons only. */
+  --g-blue: #4285f4;
+  --g-red: #ea4335;
+  --g-yellow: #fbbc04;
+  --g-green: #34a853;
+
+  /* Darker Google shades for text and buttons. theme.test.ts checks every pairing below. */
+  --blue: #1a73e8;
+  --blue-strong: #1967d2;
+  --blue-ink: #174ea6;
+  --blue-tint: #e8f0fe;
+  --red-strong: #c5221f;
+  --red-tint: #fce8e6;
+  --green-strong: #137333;
+  --green-tint: #e6f4ea;
+  --yellow-ink: #7a4d00;
+  --yellow-tint: #fef7e0;
+
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f4;
+  --text: #202124;
+  --text-2: #5f6368;
+  --line: #dadce0;
+  --control-line: #80868b;
+  --on-dark: #ffffff;
+  /* Decorative fills for the drawn demo map only; never behind text. */
+  --map-land: #edf2e8;
+  --map-park: #d9e8d1;
+
+  --radius: 14px;
+  --radius-lg: 24px;
+  --font: 'Google Sans', Roboto, 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+}
+
+.high-contrast {
+  --text: #000000;
+  --text-2: #202124;
+  --line: #5f6368;
+  --control-line: #202124;
+  --blue-strong: #0b3d91;
+  --blue-ink: #0b3d91;
+  --red-strong: #a50e0e;
+  --green-strong: #0d652d;
+  --yellow-ink: #5c3a00;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-tap-highlight-color: transparent;
+}

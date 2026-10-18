@@ -1,0 +1,36 @@
+.payment-success {
+  position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; height: 100dvh; max-height: none;
+  margin: 0; padding: 0; border: 0; background: var(--surface); color: var(--text); overflow-y: auto;
+}
+.payment-success::backdrop { background: var(--surface); }
+.payment-success-content {
+  display: flex; flex-direction: column; gap: 24px; width: 100%; max-width: 480px; min-height: 100%; margin: 0 auto;
+  padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  text-align: center;
+}
+.payment-success-brand { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--blue-strong); font-weight: 700; }
+.payment-success-brand .chip { font-size: 0.75em; }
+.payment-success-message { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 0; }
+.payment-success-art { width: 240px; max-width: 100%; height: auto; flex: none; }
+.payment-success h1 { font-size: 1.625em; line-height: 1.2; letter-spacing: -0.03em; text-wrap: balance; outline: none; }
+.payment-success-amount { font-size: 2.25em; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
+.payment-success-booking { font-weight: 600; overflow-wrap: anywhere; }
+.payment-success-message .muted { max-width: 30ch; text-wrap: balance; }
+.payment-check-circle { fill: var(--blue); transform-origin: center; animation: payment-check-pop 420ms cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+.payment-check-stroke {
+  fill: none; stroke: var(--on-dark); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 1; stroke-dashoffset: 0; animation: payment-check-draw 380ms 180ms ease-out both;
+}
+.confetti-blue { color: var(--g-blue); }
+.confetti-green { color: var(--g-green); }
+.confetti-yellow { color: var(--g-yellow); }
+.confetti-red { color: var(--g-red); }
+.payment-confetti > * { fill: currentColor; transform-box: fill-box; transform-origin: center; animation: payment-confetti-pop 650ms 140ms ease-out both; }
+.payment-confetti > :nth-child(even) { animation-delay: 240ms; }
+.payment-confetti .confetti-arc { fill: none; stroke: currentColor; stroke-width: 5; stroke-linecap: round; }
+@keyframes payment-check-pop { from { transform: scale(0.65); opacity: 0; } 70% { transform: scale(1.06); opacity: 1; } to { transform: scale(1); opacity: 1; } }
+@keyframes payment-check-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes payment-confetti-pop { from { scale: 0; opacity: 0; } 65% { scale: 1.15; opacity: 1; } to { scale: 1; opacity: 0.75; } }
+@media (prefers-reduced-motion: reduce) {
+  .payment-check-circle, .payment-check-stroke, .payment-confetti > * { animation: none; }
+}

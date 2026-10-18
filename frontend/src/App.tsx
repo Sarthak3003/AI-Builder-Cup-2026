@@ -1,97 +1,257 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, serviceNames } from './hub'
+import type { CareState, HubState } from './hub'
+import { wordsFor } from './copy'
+import { applyShortcut, useRoute } from './route'
+import type { Route } from './route'
+import { useInstall, useOnline } from './usePwa'
+import { useRunner } from './useRunner'
+import { ActivityIcon, AppsIcon, FamilyIcon, HomeIcon, LogoMark, ProfileIcon } from './icons'
+import BottomNav from './components/BottomNav'
+import SplashScreen from './components/SplashScreen'
+import type { Tab } from './components/BottomNav'
+import { OfflineBanner } from './components/Banners'
+import ConnectionStatus from './ConnectionStatus'
+import ActivityScreen from './screens/ActivityScreen'
+import AboutScreen from './screens/AboutScreen'
+import CareScreen from './screens/CareScreen'
+import DetailScreen from './screens/DetailScreen'
+import Home from './screens/Home'
+import JoinScreen from './screens/JoinScreen'
+import ProfileScreen from './screens/ProfileScreen'
+import RequestScreen from './screens/RequestScreen'
+import ServicesScreen from './screens/ServicesScreen'
+import SimpleHome from './screens/SimpleHome'
+import OnboardingWizard from './onboarding/OnboardingWizard'
+import type { Hub } from './screens/hubType'
+import Overview from './care/Overview'
+import { Approvals, CareActivity, CareDetail } from './care/CareActivity'
+import { CircleSettings, Conversations, Safety } from './care/CareScreens'
+import type { CareHub } from './care/careHub'
+import { useI18n } from './i18n'
+import LanguageProvider from './LanguageProvider'
+import './theme.css'
 import './App.css'
 
-type Connection =
-  | { state: 'checking' }
-  | { state: 'online'; version: string }
-  | { state: 'offline' }
+const reason = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback)
+const POLL_MS = 8000
+
+function pageTitle(route: Route): string {
+  switch (route.page) {
+    case 'request': return serviceNames[route.service]
+    case 'home': return 'Home'
+    case 'activity': return 'Activity'
+    case 'detail': return 'Activity details'
+    case 'join': return 'Join a Care Circle'
+    case 'services': return 'Demo services'
+    case 'onboarding': return 'Set up Saathi'
+    case 'family': return 'Care Circle'
+    case 'profile': return 'Profile'
+    case 'about': return 'About'
+    case 'approvals': return 'Approvals'
+    case 'conversations': return 'Conversations'
+    case 'safety': return 'Safety'
+    case 'circle': return 'Care Circle settings'
+  }
+}
 
 export default function App() {
-  const [connection, setConnection] = useState<Connection>({ state: 'checking' })
-  const [attempt, setAttempt] = useState(0)
-  const [showLogin, setShowLogin] = useState(false)
+  return <LanguageProvider><AppContent /></LanguageProvider>
+}
+
+function AppContent() {
+  const { language, setLanguage, t, text } = useI18n()
+  const [state, setState] = useState<HubState | CareState | null>(null)
+  const { busy, error, notice, run, setError, setNotice, inFlight, operationVersion } = useRunner()
+  const [route, go] = useRoute()
+  const online = useOnline()
+  const install = useInstall()
+  const main = useRef<HTMLElement>(null)
+  const firstRoute = useRef(true)
+  const boot = useRef<Promise<HubState | CareState> | null>(null)
+  const [splashFinished, setSplashFinished] = useState(false)
+  const [welcomed, setWelcomed] = useState(false)
+  const [launchAtHome] = useState(route.page === 'home')
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSplashFinished(true), 700)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const refresh = useCallback(async () => setState(await api<HubState | CareState>('/state')), [])
+  const start = useCallback(async () => {
+    try { setState(await api<HubState>('/session', 'POST', {})); setError('') } catch (failure) { setError(reason(failure, 'Cannot connect to Saathi.')) }
+  }, [setError])
 
   useEffect(() => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
     let active = true
-    async function checkConnection() {
-      try {
-        const responses = await Promise.all([
-          fetch('/api/health', { signal: controller.signal }),
-          fetch('/api/version', { signal: controller.signal }),
-        ])
-        if (responses.some((response) => !response.ok)) throw new Error('API unavailable')
-        const [health, version] = await Promise.all(responses.map((response) => response.json()))
-        if (health.status !== 'ok' || health.service !== 'saathi-api' || typeof version.version !== 'string') {
-          throw new Error('Unexpected API response')
-        }
-        if (active) setConnection({ state: 'online', version: version.version })
-      } catch {
-        if (active) setConnection({ state: 'offline' })
-      } finally {
-        clearTimeout(timeout)
-      }
-    }
-    void checkConnection()
-    return () => {
-      active = false
-      clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [attempt])
+    boot.current ??= api<HubState | CareState>('/session', 'POST', {})
+    void boot.current.then((data) => { if (active) setState(data) }).catch((failure) => { if (active) setError(reason(failure, 'Cannot connect to Saathi.')) })
+    return () => { active = false }
+  }, [setError])
+  useEffect(() => { applyShortcut(go) }, [go])
 
-  function retry() {
-    setConnection({ state: 'checking' })
-    setAttempt((value) => value + 1)
+  // Approvals and alerts made on another device show up here without a manual refresh.
+  const signedIn = state !== null
+  const pollMs = ['activity', 'detail', 'profile', 'conversations'].includes(route.page) ? 3000 : POLL_MS
+  useEffect(() => {
+    if (!signedIn) return
+    let active = true
+    let pending = false
+    const poll = () => {
+      if (!active || pending || inFlight.current || document.visibilityState !== 'visible' || !navigator.onLine) return
+      pending = true
+      const version = operationVersion.current
+      api<HubState | CareState>('/snapshot').then((data) => { if (active && version === operationVersion.current) setState(data) }).catch((failure) => {
+        if (active && version === operationVersion.current && failure instanceof Error && /removed|revoked|expired|Invalid session/i.test(failure.message)) { setState(null); setError(failure.message) }
+      }).finally(() => { pending = false })
+    }
+    const timer = window.setInterval(poll, pollMs)
+    document.addEventListener('visibilitychange', poll)
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', poll) }
+  }, [signedIn, setError, pollMs, inFlight, operationVersion])
+
+  const care = state?.role === 'caregiver' ? state : null
+  const owner = state?.role === 'owner' ? state : null
+  const savedLanguage = owner ? owner.profile.language : care?.owner.language
+  useEffect(() => { if (savedLanguage) setLanguage(savedLanguage) }, [savedLanguage, state?.role, setLanguage])
+
+  // A brand-new owner starts in setup once; Save and exit later returns them to Home.
+  const setupChecked = useRef(false)
+  useEffect(() => {
+    if (!owner || setupChecked.current) return
+    setupChecked.current = true
+    const flow = owner.onboarding
+    if (flow && !flow.completed && !flow.started_at && route.page === 'home') go({ page: 'onboarding' })
+  }, [owner, route.page, go])
+
+  // Announce each screen: new title, and move keyboard and screen-reader focus to the top of the content.
+  const title = route.page === 'home' ? t('Home', 'होम') : text(pageTitle(route))
+  useEffect(() => {
+    document.title = `${title} · ${language === 'hi-IN' ? 'साथी' : 'Saathi'}`
+  }, [title, language])
+  const routeTitle = pageTitle(route)
+  useEffect(() => {
+    if (firstRoute.current) { firstRoute.current = false; return }
+    main.current?.focus()
+  }, [routeTitle])
+
+  const hub: Hub | null = owner ? { state: owner, busy, online, run, refresh, setState, notify: setNotice } : null
+  const careHub: CareHub | null = care ? { state: care, busy, run, refresh, notify: setNotice } : null
+  const words = wordsFor(language)
+  const simple = Boolean(owner?.profile.simple)
+  const alerts = owner?.events?.filter((event) => event.status === 'open' && event.severity === 'attention').length ?? 0
+  const ownerTabs: Tab[] = [
+    { page: 'home', label: words.home, icon: <HomeIcon /> },
+    { page: 'activity', label: words.activity, icon: <ActivityIcon /> },
+    { page: 'services', label: words.services, icon: <AppsIcon /> },
+    { page: 'family', label: words.family, icon: <FamilyIcon />, badge: alerts, badgeLabel: t('needing attention', 'ध्यान देने की ज़रूरत') },
+    { page: 'profile', label: words.profile, icon: <ProfileIcon /> },
+  ]
+  const careAlerts = care?.events.filter((event) => event.status === 'open' && event.kind !== 'approval_needed').length ?? 0
+  const careTabs: Tab[] = [
+    { page: 'home', label: t('Overview', 'एक नज़र में'), icon: <HomeIcon /> },
+    { page: 'activity', label: text('Activity'), icon: <ActivityIcon /> },
+    { page: 'approvals', label: text('Approvals'), icon: <FamilyIcon />, badge: care?.approvals.length ?? 0 },
+    { page: 'conversations', label: t('Chats', 'बातचीत'), icon: <AppsIcon /> },
+    { page: 'safety', label: text('Safety'), icon: <ProfileIcon />, badge: careAlerts, badgeLabel: t('alerts to review', 'देखने योग्य सूचनाएँ') },
+  ]
+  const tabs = care ? careTabs : simple ? ownerTabs.slice(0, 2) : ownerTabs
+
+  const join = (code: string) => void run(async () => {
+    setState(await api<CareState>('/caregiver/join', 'POST', { code }))
+    window.location.hash = '#/'
+  })
+  const leave = () => void run(async () => { await api('/session', 'DELETE'); setState(null); window.location.hash = '#/'; await start() })
+  const switchTo = (id: string) => void run(async () => {
+    setState(await api<HubState | CareState>('/demo/switch', 'POST', { to: id }))
+    window.location.hash = '#/'
+  })
+
+  function ownerScreen(current: Hub) {
+    const home = simple ? <SimpleHome hub={current} /> : <Home hub={current} install={install} />
+    switch (route.page) {
+      case 'request': return <RequestScreen key={`${route.service}/${route.proposal ?? ''}`} hub={current} service={route.service} proposalId={route.proposal} simple={simple} />
+      case 'activity': return <ActivityScreen hub={current} simple={simple} />
+      case 'detail': return <DetailScreen key={route.id} hub={current} id={route.id} />
+      case 'services': return <ServicesScreen hub={current} />
+      case 'onboarding': return <OnboardingWizard hub={current} step={route.step} />
+      case 'family': return <CareScreen hub={current} />
+      case 'profile': return <ProfileScreen hub={current} install={install} onSwitch={switchTo} />
+      case 'about': return <AboutScreen hub={current} />
+      default: return home
+    }
+  }
+
+  function careScreen(current: CareHub) {
+    switch (route.page) {
+      case 'activity': return <CareActivity hub={current} />
+      case 'detail': return <CareDetail hub={current} id={route.id} />
+      case 'approvals': return <Approvals hub={current} />
+      case 'conversations': return <Conversations hub={current} />
+      case 'safety': return <Safety hub={current} />
+      case 'circle': return <CircleSettings hub={current} onLeave={leave} onSwitch={switchTo} />
+      default: return <Overview hub={current} />
+    }
+  }
+
+  function content() {
+    if (route.page === 'join') return <JoinScreen code={route.code} busy={busy} signedIn={signedIn} onJoin={join} />
+    if (careHub) return careScreen(careHub)
+    if (hub) return ownerScreen(hub)
+    return (
+      <section className="card">
+        <h1 className="page-title">{t('Your everyday companion', 'आपका रोज़मर्रा का साथी')}</h1>
+        <p>{t('Opening Saathi…', 'साथी खुल रहा है…')}</p>
+        <button className="primary wide" disabled={busy || !online} onClick={() => void start()}>{t('Connect', 'जुड़ें')}</button>
+      </section>
+    )
+  }
+
+  const firstVisit = owner?.onboarding && !owner.onboarding.completed && !owner.onboarding.started_at
+  if (!error && online && route.page !== 'join') {
+    if (!state || !splashFinished) return <div className="app"><SplashScreen /></div>
+    if (firstVisit && launchAtHome && !welcomed) return <div className="app"><SplashScreen welcome onContinue={() => { setWelcomed(true); go({ page: 'onboarding' }) }} /></div>
   }
 
   return (
-    <div className="shell">
-      <a className="skip-link" href="#main">Skip to content</a>
-      <header>
-        <a className="brand" href="/" aria-label="Saathi home"><span className="brand-mark" aria-hidden="true">s</span>saathi<span className="brand-dot">.</span></a>
-        <button className="secondary" onClick={() => setShowLogin((value) => !value)}>{showLogin ? 'Back to home' : 'Sign in'}</button>
-      </header>
-      <main id="main">
-        <div className="eyebrow"><span aria-hidden="true" /> YOUR EVERYDAY COMPANION</div>
-        <h1>A little help.<br /><span>A more independent you.</span></h1>
-        <p className="intro">Everyday things should feel easy. Saathi is being built to help you get where you need to go, find a meal, and manage your essentials.</p>
-        {showLogin ? (
-          <section className="login-panel" aria-labelledby="login-title">
-            <div className="section-label">YOUR SAATHI ACCOUNT</div>
-            <h2 id="login-title">A familiar place, just for you.</h2>
-            <p>Sign-in and saved profiles are coming in Phase 2. There is no need to enter your personal details yet.</p>
-            <button className="secondary" onClick={() => setShowLogin(false)}>Back to home</button>
-          </section>
-        ) : (
-          <>
-            <section className="voice-panel" aria-labelledby="voice-title">
-              <div><div className="section-label">START WITH A CONVERSATION</div><h2 id="voice-title">Just say what you need.</h2><p>Call, message, or use the app.<br />One companion that remembers you.</p></div>
-              <div className="voice-action"><button disabled className="talk"><span aria-hidden="true">◉</span> Talk to Saathi</button><span>Voice is coming in Phase 6</span></div>
-            </section>
-            <section aria-labelledby="help-title">
-              <div className="section-heading"><h2 id="help-title">A hand with the everyday</h2><span>Services coming in Phase 4</span></div>
-              <div className="services">
-                <article><span className="service-icon" aria-hidden="true">↗</span><h3>Go somewhere</h3><p>A ride to your doctor,<br />family, or anywhere else.</p><span className="soon">Rides · Coming soon</span></article>
-                <article><span className="service-icon" aria-hidden="true">♧</span><h3>Find a meal</h3><p>Something comforting,<br />made for your preferences.</p><span className="soon">Food · Coming soon</span></article>
-                <article><span className="service-icon" aria-hidden="true">✚</span><h3>Your essentials</h3><p>Help finding medicines<br />already saved in your profile.</p><span className="soon">Medicines · Coming soon</span></article>
+    <div className={`app${owner?.profile.large_text ? ' large-text' : ''}${owner?.profile.high_contrast ? ' high-contrast' : ''}${simple ? ' simple' : ''}${care ? ' care' : ''}`}>
+      <a className="skip-link" href="#main" onClick={(event) => { event.preventDefault(); main.current?.focus() }}>{t('Skip to content', 'मुख्य सामग्री पर जाएँ')}</a>
+      <div className="frame">
+        <OfflineBanner online={online} />
+        <header className="topbar">
+          <a className="brand" href="#/" aria-label={t('Saathi home', 'साथी का होम पेज')}><LogoMark size={34} /><span className="wordmark">{t('saathi', 'साथी')}</span></a>
+          {care ? <span className="chip">{t('Care Circle', 'केयर सर्कल')}</span> : null}
+          {care ? <a className="avatar" href="#/circle" aria-label={t('Care Circle and settings', 'केयर सर्कल और सेटिंग्स')}>{care.grant.name.slice(0, 1)}</a> : null}
+          {owner && !simple ? <a className="avatar" href="#/profile" aria-label={t('Open profile', 'प्रोफ़ाइल खोलें')}>{owner.profile.name.slice(0, 1)}</a> : null}
+        </header>
+
+        <div className="action-feedback" role="status" aria-live="polite" aria-atomic="true">
+          {busy ? <div className="action-progress"><span className="action-spinner" aria-hidden="true" />{t('Working on it…', 'काम हो रहा है…')}</div>
+            : notice ? <div className="action-success"><span aria-hidden="true">✓</span><span>{text(notice)}</span><button type="button" className="secondary small" onClick={() => setNotice('')} aria-label={t('Dismiss notification', 'सूचना हटाएँ')}>×</button></div> : null}
+        </div>
+        <main id="main" tabIndex={-1} ref={main} aria-busy={busy}>
+          {error ? (
+            <div className="error" role="alert">
+              <p>{text(error)}</p>
+              <div className="actions">
+                <button className="secondary" onClick={() => void run(state ? refresh : start)}>{t('Retry connection', 'फिर जुड़ने की कोशिश करें')}</button>
+                <button className="secondary" onClick={() => void run(async () => { await api('/session', 'DELETE'); setState(null); await start() })}>{t('Start a new demo session', 'नया डेमो सत्र शुरू करें')}</button>
               </div>
-            </section>
-          </>
-        )}
-        <section className="connection" aria-labelledby="connection-title">
-          <div><h2 id="connection-title">Foundation preview</h2><p>Booking, payments, and AI conversations are not active yet.</p></div>
-          <div className="connection-result">
-            <p role="status" className={connection.state}>
-              <span className="status-dot" aria-hidden="true" />
-              {connection.state === 'checking' ? 'Connecting to Saathi…' : connection.state === 'online' ? `Backend connected · v${connection.version}` : 'Backend unavailable'}
-            </p>
-            {connection.state === 'offline' ? <button className="retry" onClick={retry}>Try again</button> : null}
-          </div>
-        </section>
-      </main>
-      <footer><span>Technology that adapts to you.</span><span>SAATHI · PHASE 01</span></footer>
+            </div>
+          ) : null}
+          {content()}
+        </main>
+
+        <footer className="footnote">
+          {simple ? <p>{words.notEmergency}</p> : (
+            <>
+              <details className="connection-details"><summary>{t('Connection status', 'कनेक्शन की स्थिति')}</summary><ConnectionStatus /></details>
+              <a href="#/about">{t('About Saathi', 'साथी के बारे में')}</a>
+            </>
+          )}
+        </footer>
+        {state && route.page !== 'onboarding' ? <BottomNav route={route} tabs={tabs} /> : null}
+      </div>
     </div>
   )
 }

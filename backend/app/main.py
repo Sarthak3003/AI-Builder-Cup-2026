@@ -1,7 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 
 from app.config import Settings
+from app.database import FirestoreConnection
+from app.demo import demo_router
+from app.hub import hub_router
 
 
 class HealthResponse(BaseModel):
@@ -16,7 +19,27 @@ class VersionResponse(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
-    application = FastAPI(title="Saathi API", version=config.version)
+    local = config.environment in {"local", "test"}
+    application = FastAPI(
+        title="Saathi API", version=config.version,
+        docs_url="/docs" if local else None,
+        redoc_url="/redoc" if local else None,
+        openapi_url="/openapi.json" if local else None,
+    )
+
+    @application.middleware("http")
+    async def private_api_responses(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=(self)"
+        if not local:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        if request.url.path.startswith("/api/"):
+            # Hosting/CDNs must not retain profiles, session errors or stale readiness.
+            response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     @application.get("/health", response_model=HealthResponse)
     @application.get("/api/health", response_model=HealthResponse, include_in_schema=False)
@@ -28,6 +51,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/version", response_model=VersionResponse, include_in_schema=False)
     def version() -> VersionResponse:
         return VersionResponse(version=config.version, environment=config.environment)
+
+    @application.get("/ready")
+    @application.get("/api/ready", include_in_schema=False)
+    def readiness(response: Response) -> dict[str, str]:
+        status = FirestoreConnection(config).probe()
+        response.status_code = 200 if status == "ready" else 503
+        return {"status": "ready" if status == "ready" else "not_ready", "firestore": status}
+
+    # Local-only until public access controls and cloud storage are configured.
+    if config.environment in {"local", "test"}:
+        application.include_router(demo_router(config))
+    if config.environment in {"local", "test"} or config.firestore_mode == "cloud":
+        application.include_router(hub_router(config))
 
     return application
 
