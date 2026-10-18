@@ -76,7 +76,7 @@ def configured() -> bool:
 
 
 def _generate[Reply: BaseModel](
-    parts: list[dict], profile: dict, schema: type[Reply], *, timeout: float = 25
+    parts: list[dict], profile: dict, schema: type[Reply], *, timeout: float = 45
 ) -> Reply:
     key = os.environ.get("SAATHI_GEMINI_API_KEY")
     if not key:
@@ -149,7 +149,7 @@ def _generate[Reply: BaseModel](
     raise failure
 
 
-def draft_request(message: str, profile: dict, *, timeout: float = 25) -> Draft:
+def draft_request(message: str, profile: dict, *, timeout: float = 45) -> Draft:
     return _generate([{"text": message}], profile, Draft, timeout=timeout)
 
 
