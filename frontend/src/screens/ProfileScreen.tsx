@@ -57,10 +57,6 @@ export default function ProfileScreen({ hub, install, onSwitch }: { hub: Hub; in
       )}
       <details className="settings-group" name="profile-settings"><summary>{t('Telephone access', 'फ़ोन से पहुँच')}</summary><PhoneAccess hub={hub} /></details>
       {!install.installed && (install.canInstall || install.showIosSteps) ? <details className="settings-group" name="profile-settings"><summary>{t('Install the app', 'ऐप इंस्टॉल करें')}</summary><InstallCard install={install} /></details> : null}
-      <details className="settings-group" name="profile-settings"><summary>{t('Session information', 'सत्र की जानकारी')}</summary><section className="card" aria-labelledby="account-title">
-        <h2 id="account-title">{t('Your demo session', 'आपका डेमो सत्र')}</h2>
-        <p className="muted">{t('No sign-in needed. Your profile stays in this browser session for up to 24 hours. A different browser or cleared cookies starts a separate demo.', 'साइन-इन की ज़रूरत नहीं है। आपकी प्रोफ़ाइल इस ब्राउज़र सत्र में 24 घंटे तक रहती है। दूसरे ब्राउज़र या कुकीज़ हटाने पर अलग डेमो शुरू होता है।')}</p>
-      </section></details>
       {state.demo_controls ? <details className="settings-group" name="profile-settings"><summary>{t('Prototype tools', 'प्रोटोटाइप उपकरण')}</summary><DemoControls hub={hub} /></details> : null}
     </>
   )

@@ -1,5 +1,5 @@
 // Caches the app shell only. Never cache profiles, API responses or confirmations.
-const CACHE = 'saathi-shell-v2';
+const CACHE = 'saathi-shell-v4';
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {

@@ -57,8 +57,6 @@ function WelcomeStep({ hub, nav }: StepProps) {
   return (
     <form onSubmit={submitter(hub, nav, save)}>
       <p className="lead">{t('A few details to make Saathi yours.', 'साथी को अपना बनाने के लिए कुछ जानकारी दें।')}</p>
-      <p className="muted">{t('No sign-in needed. Your progress is saved in this browser.', 'साइन-इन की ज़रूरत नहीं। आपकी प्रगति इस ब्राउज़र में सहेजी जाती है।')}</p>
-      <p className="muted">{t('Preview only: no real bookings or payments.', 'केवल पूर्वावलोकन: कोई वास्तविक बुकिंग या भुगतान नहीं।')}</p>
       <label className="field"><span>{t('What should Saathi call you?', 'साथी आपको किस नाम से बुलाए?')}</span>
         <input required maxLength={60} autoComplete="given-name" value={name} onChange={(event) => setName(event.target.value)} />
       </label>
@@ -279,7 +277,7 @@ function Finished({ hub }: { hub: Hub }) {
   return (
     <section className="receipt card" aria-labelledby="finished-title">
       <h2 id="finished-title" className="step-title">{t('You are all set, {{name}}', '{{name}}, आपका सेटअप पूरा है', { name })}</h2>
-      <p className="lead">{t('Your setup is saved.', 'आपका सेटअप सहेज दिया गया है।')} {hub.state.profile.show_options === false ? t('Saathi will choose and book app rides and meals for you. Medicine requests and telephone calls still ask first.', 'साथी ऐप में आपके लिए सवारी और भोजन चुनेगा और बुक करेगा। दवा के अनुरोध और फ़ोन कॉल पर फिर भी पहले पूछा जाएगा।') : t('Saathi will check with you before every booking.', 'हर बुकिंग से पहले साथी आपसे पूछेगा।')} {t('Everything stays simulated.', 'सब कुछ सिम्युलेटेड रहता है।')}</p>
+      <p className="lead">{t('Your setup is saved.', 'आपका सेटअप सहेज दिया गया है।')} {hub.state.profile.show_options === false ? t('Saathi will choose and book app rides and meals for you. Medicine requests and telephone calls still ask first.', 'साथी ऐप में आपके लिए सवारी और भोजन चुनेगा और बुक करेगा। दवा के अनुरोध और फ़ोन कॉल पर फिर भी पहले पूछा जाएगा।') : t('Saathi will check with you before every booking.', 'हर बुकिंग से पहले साथी आपसे पूछेगा।')}</p>
       {ride?.status === 'CONNECTED' ? <a className="primary wide" href="#/request/ride">{t('Try a demo ride', 'डेमो सवारी आज़माएँ')}</a> : <a className="primary wide" href="#/services">{t('Connect a demo service', 'डेमो सेवा जोड़ें')}</a>}
       <a className="secondary wide" href="#/">{t('Go to Home', 'होम पर जाएँ')}</a>
     </section>

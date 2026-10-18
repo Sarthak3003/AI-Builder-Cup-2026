@@ -25,16 +25,7 @@ export const CheckIcon = () => <Icon size={36}><path d="M5 12.5l4.5 4.5L19 7.5" 
 export const DownloadIcon = () => <Icon><path d="M12 4v10M8 10.5l4 4 4-4M5 20h14" /></Icon>
 export const HeartIcon = () => <Icon><path d="M12 20.5s-8-4.8-8-10.6A4.7 4.7 0 0 1 12 7a4.7 4.7 0 0 1 8 2.9c0 5.8-8 10.6-8 10.6z" /></Icon>
 
-// The Saathi mark: a speech bubble with Google's red, yellow and green dots on Google blue.
+// Shared supplied brand artwork for every app surface.
 export function LogoMark({ size = 36 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" focusable="false">
-      <rect width="512" height="512" rx="112" fill="#1a73e8" />
-      <rect x="116" y="140" width="280" height="190" rx="48" fill="#fff" />
-      <path d="M158 322h74l-74 70z" fill="#fff" />
-      <circle cx="196" cy="235" r="26" fill="#ea4335" />
-      <circle cx="256" cy="235" r="26" fill="#fbbc04" />
-      <circle cx="316" cy="235" r="26" fill="#34a853" />
-    </svg>
-  )
+  return <img src="/icons/icon-512.png" width={size} height={size} alt="" aria-hidden="true" className="brand-logo" />
 }

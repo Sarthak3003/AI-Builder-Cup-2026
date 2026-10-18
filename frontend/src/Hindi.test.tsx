@@ -133,9 +133,9 @@ test.each(['', 'activity', 'approvals', 'conversations', 'safety', 'circle'])('c
   window.location.hash = '#/' + route
   render(<App />)
   await waitFor(() => expect(document.documentElement.lang).toBe('hi'))
+  const nav = await screen.findByRole('navigation', { name: 'मुख्य नेविगेशन' })
   const main = screen.getByRole('main')
   expect(within(main).getAllByRole('heading')[0]).toHaveTextContent(/[\u0900-\u097f]/)
-  const nav = screen.getByRole('navigation', { name: 'मुख्य नेविगेशन' })
   for (const link of within(nav).getAllByRole('link')) expect(link).toHaveTextContent(/[\u0900-\u097f]/)
 })
 

@@ -22,6 +22,25 @@ const quoted = (quotes: Quote[]) => ({ request_id: quotes[0].request_id, service
 const confirmCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.url.endsWith('/confirm'))
 const quoteCalls = (calls: ReturnType<typeof stubApi>) => calls.filter((call) => call.method === 'POST' && call.url.endsWith('/quotes'))
 
+test('welcoming splash stays during startup and yields to the app when ready', async () => {
+  let complete!: (value: ReturnType<typeof makeState>) => void
+  stubApi({ 'POST /session': () => new Promise(resolve => { complete = resolve }) })
+  render(<App />)
+  expect(screen.getByRole('heading', { name: 'saathi' })).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Getting things ready for you…')
+  expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument()
+  await act(async () => complete(makeState()))
+  expect(await screen.findByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
+  expect(screen.queryByText('Getting things ready for you…')).not.toBeInTheDocument()
+})
+
+test('startup failure replaces the splash with a recoverable error', async () => {
+  stubApi({ 'POST /session': () => fail(503, { detail: 'Cannot connect to Saathi.' }) })
+  render(<App />)
+  expect(await screen.findByRole('button', { name: 'Connect' })).toBeEnabled()
+  expect(screen.queryByText('Getting things ready for you…')).not.toBeInTheDocument()
+})
+
 test('Profile starts with categories and preserves drafts while moving between them', async () => {
   const calls = stubApi()
   window.location.hash = '#/profile'
@@ -598,7 +617,7 @@ test('the simplified view switch strips Home down to the mic, three tiles and a 
   expect(screen.getByRole('link', { name: 'Food' })).toHaveAttribute('href', '#/request/food')
   expect(screen.getByRole('link', { name: 'Medicine' })).toHaveAttribute('href', '#/request/medicine')
   expect(screen.getByRole('button', { name: 'Tap and speak' })).toBeInTheDocument()
-  for (const gone of [/Or choose one/, /A prototype, clearly marked/, /One conversation/, /For example/, /About this demo/]) {
+  for (const gone of [/Or choose one/, /A prototype, clearly marked/, /One conversation/, /For example/, /About Saathi/]) {
     expect(screen.queryByText(gone)).not.toBeInTheDocument()
   }
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
@@ -606,7 +625,7 @@ test('the simplified view switch strips Home down to the mic, three tiles and a 
   const nav = screen.getByRole('navigation', { name: 'Main navigation' })
   expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Activity'])
   expect(screen.getByText('Not for emergencies.')).toBeInTheDocument()
-  expect(screen.getByText('Preview')).toBeInTheDocument()
+  expect(screen.queryByText('Preview')).not.toBeInTheDocument()
 
   await userEvent.click(screen.getByRole('button', { name: 'Show full view' }))
   expect(await screen.findByRole('switch', { name: 'Enable simplified view' })).toHaveAttribute('aria-checked', 'false')

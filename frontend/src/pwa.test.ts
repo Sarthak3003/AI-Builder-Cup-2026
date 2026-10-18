@@ -120,7 +120,7 @@ const offline = () => Promise.reject(new TypeError('Failed to fetch'))
 test('install precaches the page and the files it names, then takes over', async () => {
   const worker = startWorker(online)
   await worker.lifecycle('install')
-  const cached = [...(worker.buckets.get('saathi-shell-v2')?.keys() ?? [])].map((key) => new URL(key).pathname).sort()
+  const cached = [...(worker.buckets.get('saathi-shell-v4')?.keys() ?? [])].map((key) => new URL(key).pathname).sort()
   expect(cached).toEqual(['/', '/assets/index-1.css', '/assets/index-1.js', '/icons/apple-touch-icon.png', '/manifest.webmanifest', '/saathi.svg'])
   expect(worker.scope.skipWaiting).toHaveBeenCalled()
 })
@@ -128,7 +128,7 @@ test('install precaches the page and the files it names, then takes over', async
 test('a missing optional file does not stop the app from installing', async () => {
   const worker = startWorker((path) => Promise.resolve(path === '/assets/index-1.css' ? new Response('', { status: 404 }) : path === '/' ? ok(SHELL_HTML) : ok('x')))
   await expect(worker.lifecycle('install')).resolves.toBeUndefined()
-  expect(worker.buckets.get('saathi-shell-v2')?.size).toBeGreaterThan(1)
+  expect(worker.buckets.get('saathi-shell-v4')?.size).toBeGreaterThan(1)
 })
 
 test('API calls are never intercepted or cached', async () => {
@@ -139,7 +139,7 @@ test('API calls are never intercepted or cached', async () => {
     expect(await worker.request(path)).toBeUndefined()
   }
   expect(worker.fetchStub.mock.calls.length).toBe(before)
-  const cachedPaths = [...(worker.buckets.get('saathi-shell-v2')?.keys() ?? [])]
+  const cachedPaths = [...(worker.buckets.get('saathi-shell-v4')?.keys() ?? [])]
   expect(cachedPaths.some((key) => key.includes('/api/'))).toBe(false)
 })
 
@@ -184,9 +184,9 @@ test('failed responses are not cached', async () => {
 test('activation removes older app caches only and claims open pages', async () => {
   const worker = startWorker(online)
   worker.buckets.set('saathi-shell-v1', new Map())
-  worker.buckets.set('saathi-shell-v2', new Map())
+  worker.buckets.set('saathi-shell-v4', new Map())
   worker.buckets.set('someone-elses-cache', new Map())
   await worker.lifecycle('activate')
-  expect([...worker.buckets.keys()].sort()).toEqual(['saathi-shell-v2', 'someone-elses-cache'])
+  expect([...worker.buckets.keys()].sort()).toEqual(['saathi-shell-v4', 'someone-elses-cache'])
   expect(worker.scope.clients.claim).toHaveBeenCalled()
 })

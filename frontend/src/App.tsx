@@ -8,6 +8,7 @@ import { useInstall, useOnline } from './usePwa'
 import { useRunner } from './useRunner'
 import { ActivityIcon, AppsIcon, FamilyIcon, HomeIcon, LogoMark, ProfileIcon } from './icons'
 import BottomNav from './components/BottomNav'
+import SplashScreen from './components/SplashScreen'
 import type { Tab } from './components/BottomNav'
 import { OfflineBanner } from './components/Banners'
 import ConnectionStatus from './ConnectionStatus'
@@ -68,6 +69,13 @@ function AppContent() {
   const main = useRef<HTMLElement>(null)
   const firstRoute = useRef(true)
   const boot = useRef<Promise<HubState | CareState> | null>(null)
+  const [splashFinished, setSplashFinished] = useState(false)
+  const [welcomed, setWelcomed] = useState(false)
+  const [launchAtHome] = useState(route.page === 'home')
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSplashFinished(true), 700)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const refresh = useCallback(async () => setState(await api<HubState | CareState>('/state')), [])
   const start = useCallback(async () => {
@@ -193,10 +201,16 @@ function AppContent() {
     return (
       <section className="card">
         <h1 className="page-title">{t('Your everyday companion', 'आपका रोज़मर्रा का साथी')}</h1>
-        <p>{t('Opening your demo. No sign-in needed.', 'आपका डेमो खुल रहा है। साइन-इन की ज़रूरत नहीं है।')}</p>
+        <p>{t('Opening Saathi…', 'साथी खुल रहा है…')}</p>
         <button className="primary wide" disabled={busy || !online} onClick={() => void start()}>{t('Connect', 'जुड़ें')}</button>
       </section>
     )
+  }
+
+  const firstVisit = owner?.onboarding && !owner.onboarding.completed && !owner.onboarding.started_at
+  if (!error && online && route.page !== 'join') {
+    if (!state || !splashFinished) return <div className="app"><SplashScreen /></div>
+    if (firstVisit && launchAtHome && !welcomed) return <div className="app"><SplashScreen welcome onContinue={() => { setWelcomed(true); go({ page: 'onboarding' }) }} /></div>
   }
 
   return (
@@ -206,7 +220,7 @@ function AppContent() {
         <OfflineBanner online={online} />
         <header className="topbar">
           <a className="brand" href="#/" aria-label={t('Saathi home', 'साथी का होम पेज')}><LogoMark size={34} /><span className="wordmark">{t('saathi', 'साथी')}</span></a>
-          <span className="chip demo">{care ? t('Care Circle', 'केयर सर्कल') : t('Preview', 'पूर्वावलोकन')}</span>
+          {care ? <span className="chip">{t('Care Circle', 'केयर सर्कल')}</span> : null}
           {care ? <a className="avatar" href="#/circle" aria-label={t('Care Circle and settings', 'केयर सर्कल और सेटिंग्स')}>{care.grant.name.slice(0, 1)}</a> : null}
           {owner && !simple ? <a className="avatar" href="#/profile" aria-label={t('Open profile', 'प्रोफ़ाइल खोलें')}>{owner.profile.name.slice(0, 1)}</a> : null}
         </header>
@@ -232,8 +246,7 @@ function AppContent() {
           {simple ? <p>{words.notEmergency}</p> : (
             <>
               <details className="connection-details"><summary>{t('Connection status', 'कनेक्शन की स्थिति')}</summary><ConnectionStatus /></details>
-              <p>{t('Preview app · bookings and payments are simulated.', 'पूर्वावलोकन ऐप · बुकिंग और भुगतान सिम्युलेटेड हैं।')}</p>
-              <a href="#/about">{t('About this demo', 'इस डेमो के बारे में')}</a>
+              <a href="#/about">{t('About Saathi', 'साथी के बारे में')}</a>
             </>
           )}
         </footer>

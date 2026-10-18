@@ -15,11 +15,12 @@ const sent = (calls: ReturnType<typeof stubApi>, method: string, end: string) =>
 test('a brand-new person is taken to setup once, step 1 of 7, with the demo explained', async () => {
   stubApi({}, fresh())
   render(<App />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Get started' }))
   expect(await screen.findByRole('heading', { name: 'Welcome' })).toBeInTheDocument()
   expect(window.location.hash).toBe('#/onboarding')
   expect(screen.getByText('Step 1 of 7')).toBeInTheDocument()
   expect(screen.getByRole('progressbar', { name: 'Setup progress' })).toHaveAttribute('aria-valuenow', '1')
-  expect(screen.getByText(/Preview only: no real bookings or payments/)).toBeInTheDocument()
+  expect(screen.queryByText(/Preview only: no real bookings or payments/)).not.toBeInTheDocument()
   expect(screen.queryByRole('navigation', { name: 'Main navigation' })).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: 'What should Saathi call you?' })).toHaveValue('')
 })

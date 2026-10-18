@@ -23,7 +23,7 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
   return (
     <>
       <p className="eyebrow">GIT SET GO</p>
-      <h1 className="page-title">{t('About this demo', 'इस डेमो के बारे में')}</h1>
+      <h1 className="page-title">{t('About Saathi', 'साथी के बारे में')}</h1>
       <p>{t('Built for people who find separate service apps difficult to navigate. Team leader: Lokita Varma. Team members: Lokita Varma and Sarthak Bhan.', 'उन लोगों के लिए बनाया गया है जिन्हें अलग-अलग सेवाओं के ऐप इस्तेमाल करना मुश्किल लगता है। टीम लीडर: Lokita Varma। टीम सदस्य: Lokita Varma और Sarthak Bhan।')}</p>
 
       <section className="card">
@@ -47,7 +47,7 @@ export default function AboutScreen({ hub }: { hub: Hub }) {
 
       <section className="card">
         <h2>{t('What is still an integration', 'किन सुविधाओं का जुड़ना अभी बाकी है')}</h2>
-        <p>{t('Twilio telephone-call endpoints are implemented but a live call has not yet been verified. Calling needs server credentials and an approved number; pair from Profile when enabled. WhatsApp and SMS are not connected. Message mode is an in-app preview. Each browser gets a separate demo session.', 'Twilio फ़ोन कॉल एंडपॉइंट लागू किए गए हैं, लेकिन वास्तविक कॉल की जाँच अभी नहीं हुई है। कॉल के लिए सर्वर क्रेडेंशियल और स्वीकृत नंबर चाहिए; सुविधा चालू होने पर प्रोफ़ाइल से जोड़ें। WhatsApp और SMS जुड़े नहीं हैं। संदेश मोड ऐप के अंदर का पूर्वावलोकन है। हर ब्राउज़र को अलग डेमो सत्र मिलता है।')}</p>
+        <p>{t('Twilio telephone-call endpoints are implemented but a live call has not yet been verified. Calling needs server credentials and an approved number; pair from Profile when enabled. WhatsApp and SMS are not connected. Message mode is an in-app preview.', 'Twilio फ़ोन कॉल एंडपॉइंट लागू किए गए हैं, लेकिन वास्तविक कॉल की जाँच अभी नहीं हुई है। कॉल के लिए सर्वर क्रेडेंशियल और स्वीकृत नंबर चाहिए; सुविधा चालू होने पर प्रोफ़ाइल से जोड़ें। WhatsApp और SMS जुड़े नहीं हैं। संदेश मोड ऐप के अंदर का पूर्वावलोकन है।')}</p>
         <p>{t('Understanding requests: ', 'अनुरोध समझना: ')}<strong>{state.gemini ? t('Gemini. Microphone recordings are sent to Google to be understood.', 'Gemini। अनुरोध समझने के लिए माइक्रोफ़ोन की रिकॉर्डिंग Google को भेजी जाती है।') : t('simple word matching on this server (not AI). Speech is turned into text by your browser.', 'इस सर्वर पर साधारण शब्द मिलान (AI नहीं)। आपका ब्राउज़र आवाज़ को टेक्स्ट में बदलता है।')}</strong></p>
         <p>{t('Storage: ', 'डेटा संग्रह: ')}<strong>{text(state.storage)}</strong>{t('. Default local storage persists on this computer. Firestore emulator mode is available.', '। डिफ़ॉल्ट स्थानीय डेटा इस कंप्यूटर पर सहेजा रहता है। Firestore एमुलेटर मोड उपलब्ध है।')}</p>
         <details>

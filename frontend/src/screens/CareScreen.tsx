@@ -52,7 +52,7 @@ function InviteBox({ code }: { code: string }) {
         <input readOnly value={link} onFocus={(event) => event.target.select()} />
       </label>
       <button type="button" className="secondary small" onClick={() => void navigator.clipboard?.writeText(link)}>{t('Copy link', 'लिंक कॉपी करें')}</button>
-      <p className="muted">{t('Send it only to this person. To try it yourself, open it in a private window or another device: this browser stays as you.', 'इसे केवल इसी व्यक्ति को भेजें। खुद आज़माने के लिए निजी विंडो या दूसरे उपकरण में खोलें: इस ब्राउज़र में आपकी पहचान बनी रहेगी।')}</p>
+      <p className="muted">{t('Send this invitation only to the person you want to add.', 'यह निमंत्रण केवल उसी व्यक्ति को भेजें जिसे आप जोड़ना चाहते हैं।')}</p>
     </div>
   )
 }
