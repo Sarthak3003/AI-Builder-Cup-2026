@@ -1,16 +1,20 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    basicSsl()
+  ],
   build: {
     rolldownOptions: {
       output: { codeSplitting: { groups: [{ name: 'react-vendor', test: /node_modules\/(react|react-dom|scheduler)\// }] } },
     },
   },
   server: {
-    host: '127.0.0.1',
-    proxy: { '/api': 'http://127.0.0.1:8000' },
+    host: '0.0.0.0',
+    proxy: { '/api': { target: 'http://127.0.0.1:8000', secure: false } },
   },
   test: {
     environment: 'jsdom',
